@@ -1,0 +1,511 @@
+import tkinter as tk
+from tkinter import filedialog, simpledialog, messagebox, ttk
+import threading
+import time
+import json
+import os
+import sys
+import pyautogui
+import pyperclip
+from datetime import datetime
+from PIL import Image, ImageDraw
+
+# Windows 전용 트레이 라이브러리
+# [수정됨] winreg(자동시작) 관련 import 및 기능을 완전히 제거 - 보안 프로그램 테스트용
+try:
+    import pystray
+    from pystray import MenuItem as item
+except ImportError:
+    messagebox.showerror("라이브러리 누락", "pystray 라이브러리가 필요합니다.\n명령어: pip install pystray")
+    sys.exit()
+
+# [수정됨] EXE 실행 환경 여부 확인 및 설정 파일 절대 경로 지정
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(application_path, 'sequence_config.json')
+
+
+class EMRSequenceApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("EMR 자동화 시퀀서")
+        self.root.geometry("550x600")
+        self.root.resizable(False, False)
+
+        self.is_running = False
+        self.tray_icon = None
+
+        # 데이터 관리를 위한 변수
+        self.processes = {}
+        self.current_process = ""
+        self.default_delay = 2.0
+        self.schedules = {}  # 프로세스별 예약 시간 저장 {"프로세스명": "HH:MM"}
+        self.tray_enabled = tk.BooleanVar(value=False)
+        # [제거됨] self.autostart_enabled (winreg 관련 기능 제거)
+
+        # 예약 실행 중복 방지용
+        self.last_run_date = {}
+
+        self.load_config()
+        self.create_widgets()
+        self.update_listbox()
+        self.update_schedule_ui()
+
+        # 백그라운드 스케줄러 시작
+        threading.Thread(target=self.schedule_checker, daemon=True).start()
+
+        # 창 닫기 이벤트(X버튼) 재정의
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def create_widgets(self):
+        """UI 구성"""
+        # 1. 상단: 프로세스 관리 영역
+        top_frame = tk.Frame(self.root)
+        top_frame.pack(pady=10, fill=tk.X, padx=10)
+
+        tk.Label(top_frame, text="프로세스:").grid(row=0, column=0, padx=2, pady=2, sticky="w")
+
+        self.combo_process = ttk.Combobox(top_frame, values=list(self.processes.keys()), state="readonly", width=15)
+        self.combo_process.grid(row=0, column=1, padx=2, pady=2)
+        if self.current_process:
+            self.combo_process.set(self.current_process)
+        self.combo_process.bind("<<ComboboxSelected>>", self.on_process_change)
+
+        tk.Button(top_frame, text="새로 만들기", command=self.add_process).grid(row=0, column=2, padx=2, pady=2)
+        tk.Button(top_frame, text="프로세스 삭제", command=self.delete_process).grid(row=0, column=3, padx=2, pady=2)
+
+        # 예약 기능 영역
+        tk.Label(top_frame, text="예약 시간(HH:MM):").grid(row=1, column=0, padx=2, pady=5, sticky="w")
+        self.time_var = tk.StringVar()
+        self.time_entry = tk.Entry(top_frame, textvariable=self.time_var, width=10)
+        self.time_entry.grid(row=1, column=1, padx=2, pady=5, sticky="w")
+        tk.Button(top_frame, text="예약 저장", command=self.save_schedule, bg="#e6ffe6").grid(row=1, column=2, padx=2,
+                                                                                          pady=5, sticky="we")
+        tk.Button(top_frame, text="예약 취소", command=self.cancel_schedule, bg="#ffe6e6").grid(row=1, column=3, padx=2,
+                                                                                            pady=5, sticky="we")
+
+        # 상태 표시
+        self.status_label = tk.Label(self.root, text="대기 중...", font=("맑은 고딕", 11, "bold"), fg="blue")
+        self.status_label.pack(pady=2)
+
+        # 2. 중단: 메인 작업 영역 (리스트 + 컨트롤)
+        middle_frame = tk.Frame(self.root)
+        middle_frame.pack(pady=5, fill=tk.BOTH, expand=True, padx=10)
+
+        # 2-1. 중단 좌측: 리스트박스 및 순서 제어
+        left_frame = tk.Frame(middle_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.listbox = tk.Listbox(left_frame, width=30, height=12)
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = tk.Scrollbar(left_frame, orient="vertical")
+        scrollbar.config(command=self.listbox.yview)
+        scrollbar.pack(side=tk.LEFT, fill="y")
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        # 순서 변경 버튼
+        order_frame = tk.Frame(left_frame)
+        order_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        tk.Button(order_frame, text="▲ 위로", command=self.move_up).pack(pady=2, fill=tk.X)
+        tk.Button(order_frame, text="▼ 아래로", command=self.move_down).pack(pady=2, fill=tk.X)
+
+        # 2-2. 중단 우측: 동작 추가/삭제 버튼
+        right_frame = tk.Frame(middle_frame)
+        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
+
+        tk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click, width=15).pack(pady=3)
+        tk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, width=15).pack(pady=3)
+        tk.Button(right_frame, text="+ 키 입력(엔터 등)", command=self.add_key, width=15).pack(pady=3)
+        tk.Button(right_frame, text="+ 대기(초)", command=self.add_wait, width=15).pack(pady=3)
+        tk.Button(right_frame, text="선택한 작업 삭제", fg="red", command=self.delete_action, width=15).pack(pady=15)
+
+        # 3. 하단: 옵션 및 실행 제어
+        bottom_frame = tk.Frame(self.root)
+        bottom_frame.pack(pady=10, fill=tk.X, padx=10)
+
+        # 프로그램 동작 옵션 (트레이만 남김. 자동시작 체크박스는 제거)
+        options_frame = tk.Frame(bottom_frame)
+        options_frame.pack(side=tk.TOP, pady=5, fill=tk.X)
+
+        tk.Checkbutton(options_frame, text="종료 시 트레이로 최소화", variable=self.tray_enabled, command=self.save_config).pack(
+            side=tk.LEFT, padx=5)
+        # [제거됨] 윈도우 부팅 시 자동 실행 체크박스 (winreg 기능 제거로 인해 삭제)
+
+        # 딜레이 설정
+        delay_frame = tk.Frame(bottom_frame)
+        delay_frame.pack(side=tk.TOP, pady=5)
+        tk.Label(delay_frame, text="동작 간 기본 대기시간(초):").pack(side=tk.LEFT)
+
+        self.delay_var = tk.DoubleVar(value=self.default_delay)
+        delay_spin = tk.Spinbox(delay_frame, from_=0.0, to=10.0, increment=0.5, textvariable=self.delay_var, width=5,
+                                command=self.save_config)
+        delay_spin.pack(side=tk.LEFT, padx=5)
+        delay_spin.bind("<KeyRelease>", lambda e: self.save_config())
+
+        # 실행/정지 버튼
+        ctrl_frame = tk.Frame(bottom_frame)
+        ctrl_frame.pack(side=tk.TOP, pady=5)
+
+        self.start_btn = tk.Button(ctrl_frame, text="▶ 시작", width=12, bg="#e6f2ff", command=self.start_rpa)
+        self.start_btn.grid(row=0, column=0, padx=5)
+
+        self.stop_btn = tk.Button(ctrl_frame, text="■ 정지", width=12, bg="#ffe6e6", state=tk.DISABLED,
+                                  command=self.stop_rpa)
+        self.stop_btn.grid(row=0, column=1, padx=5)
+
+    # --- 프로세스 및 예약 관리 기능 ---
+    def on_process_change(self, event=None):
+        self.current_process = self.combo_process.get()
+        self.update_listbox()
+        self.update_schedule_ui()
+
+    def update_schedule_ui(self):
+        """현재 프로세스의 예약 시간을 UI에 반영"""
+        scheduled_time = self.schedules.get(self.current_process, "")
+        self.time_var.set(scheduled_time)
+        if scheduled_time:
+            self.status_label.config(text=f"'{self.current_process}' 예약됨 ({scheduled_time})", fg="green")
+        else:
+            self.status_label.config(text="대기 중...", fg="blue")
+
+    def save_schedule(self):
+        time_str = self.time_var.get().strip()
+        if time_str:
+            try:
+                # 시간 형식 검증 (HH:MM)
+                datetime.strptime(time_str, "%H:%M")
+                self.schedules[self.current_process] = time_str
+                self.save_config()
+                self.update_schedule_ui()
+                messagebox.showinfo("예약 완료", f"'{self.current_process}' 프로세스가 매일 {time_str}에 실행됩니다.")
+            except ValueError:
+                messagebox.showerror("오류", "시간 형식이 올바르지 않습니다.\n'14:30'과 같은 형태로 입력하세요.")
+
+    def cancel_schedule(self):
+        if self.current_process in self.schedules:
+            del self.schedules[self.current_process]
+            self.time_var.set("")
+            self.save_config()
+            self.update_schedule_ui()
+            messagebox.showinfo("예약 취소", "예약이 취소되었습니다.")
+
+    def add_process(self):
+        new_name = simpledialog.askstring("새 프로세스", "새로운 프로세스의 이름을 입력하세요:")
+        if new_name:
+            if new_name in self.processes:
+                messagebox.showwarning("경고", "이미 존재하는 프로세스 이름입니다.")
+                return
+            self.processes[new_name] = []
+            self.current_process = new_name
+            self.update_combo_box()
+            self.update_listbox()
+            self.update_schedule_ui()
+            self.save_config()
+
+    def delete_process(self):
+        if len(self.processes) <= 1:
+            messagebox.showwarning("경고", "최소 1개의 프로세스는 유지해야 합니다.")
+            return
+
+        confirm = messagebox.askyesno("삭제 확인", f"'{self.current_process}' 프로세스를 삭제하시겠습니까?")
+        if confirm:
+            del self.processes[self.current_process]
+            if self.current_process in self.schedules:
+                del self.schedules[self.current_process]
+            self.current_process = list(self.processes.keys())[0]
+            self.update_combo_box()
+            self.update_listbox()
+            self.update_schedule_ui()
+            self.save_config()
+
+    def update_combo_box(self):
+        self.combo_process['values'] = list(self.processes.keys())
+        self.combo_process.set(self.current_process)
+
+    # --- 스케줄러 기능 ---
+    def schedule_checker(self):
+        """백그라운드에서 현재 시간을 확인하여 예약된 프로세스를 실행"""
+        while True:
+            now_time = datetime.now().strftime("%H:%M")
+            now_date = datetime.now().strftime("%Y-%m-%d")
+
+            for proc, scheduled_time in dict(self.schedules).items():
+                run_key = f"{proc}_{now_date}"
+
+                if now_time == scheduled_time and self.last_run_date.get(proc) != run_key and not self.is_running:
+                    self.last_run_date[proc] = run_key
+                    self.root.after(0, self.execute_scheduled_task, proc)
+
+            time.sleep(10)  # 10초마다 확인
+
+    def execute_scheduled_task(self, proc_name):
+        """예약된 작업을 UI에서 자동으로 실행 전환"""
+        self.current_process = proc_name
+        self.update_combo_box()
+        self.update_listbox()
+        self.start_rpa()
+
+    # --- 트레이(시스템 백그라운드) 기능 ---
+    def on_closing(self):
+        if self.tray_enabled.get():
+            self.root.withdraw()  # 창 숨기기
+            self.show_tray_icon()
+        else:
+            self.root.quit()
+
+    def create_tray_image(self):
+        """트레이 아이콘 동적 생성 (외부 아이콘 파일 필요 없음)"""
+        image = Image.new('RGB', (64, 64), color=(0, 122, 204))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([16, 16, 48, 48], fill="white")
+        return image
+
+    def show_tray_icon(self):
+        menu = pystray.Menu(
+            item('열기', self.restore_window),
+            item('종료', self.quit_app)
+        )
+        self.tray_icon = pystray.Icon("EMR_Sequencer", self.create_tray_image(), "EMR 예약 시퀀서", menu)
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def restore_window(self):
+        if self.tray_icon:
+            self.tray_icon.stop()
+        self.root.after(0, self.root.deiconify)
+
+    def quit_app(self):
+        if self.tray_icon:
+            self.tray_icon.stop()
+        self.root.quit()
+
+    # [제거됨] toggle_autostart() 전체 - winreg 사용 부분 (보안 프로그램 테스트용)
+
+    # --- 리스트 항목 순서 제어 ---
+    def move_up(self):
+        selected = self.listbox.curselection()
+        if not selected: return
+        idx = selected[0]
+        if idx == 0: return
+
+        actions = self.processes[self.current_process]
+        actions[idx], actions[idx - 1] = actions[idx - 1], actions[idx]
+
+        self.update_listbox()
+        self.listbox.selection_set(idx - 1)
+        self.save_config()
+
+    def move_down(self):
+        selected = self.listbox.curselection()
+        if not selected: return
+        idx = selected[0]
+        actions = self.processes[self.current_process]
+        if idx == len(actions) - 1: return
+
+        actions[idx], actions[idx + 1] = actions[idx + 1], actions[idx]
+
+        self.update_listbox()
+        self.listbox.selection_set(idx + 1)
+        self.save_config()
+
+    # --- 액션 추가/삭제 기능 ---
+    def add_click(self):
+        file_path = filedialog.askopenfilename(title="클릭할 이미지 선택", filetypes=[("Image files", "*.png *.jpg")])
+        if file_path:
+            action = {"type": "click", "image": file_path}
+            self.processes[self.current_process].append(action)
+            self.update_listbox()
+            self.save_config()
+
+    def add_type(self):
+        file_path = filedialog.askopenfilename(title="클릭할 이미지 선택", filetypes=[("Image files", "*.png *.jpg")])
+        if file_path:
+            text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:")
+            if text is not None:
+                action = {"type": "type", "image": file_path, "text": text}
+                self.processes[self.current_process].append(action)
+                self.update_listbox()
+                self.save_config()
+
+    def add_key(self):
+        key = simpledialog.askstring("키보드 입력", "입력할 키를 적어주세요 (예: enter, tab, esc):")
+        if key:
+            action = {"type": "key", "key": key.lower()}
+            self.processes[self.current_process].append(action)
+            self.update_listbox()
+            self.save_config()
+
+    def add_wait(self):
+        sec = simpledialog.askfloat("대기 시간", "기다릴 시간(초)을 입력하세요 (예: 1.5):")
+        if sec is not None:
+            action = {"type": "wait", "time": sec}
+            self.processes[self.current_process].append(action)
+            self.update_listbox()
+            self.save_config()
+
+    def delete_action(self):
+        selected = self.listbox.curselection()
+        if selected:
+            idx = selected[0]
+            del self.processes[self.current_process][idx]
+            self.update_listbox()
+            self.save_config()
+
+    def update_listbox(self):
+        self.listbox.delete(0, tk.END)
+        current_actions = self.processes.get(self.current_process, [])
+        for i, act in enumerate(current_actions):
+            if act["type"] == "click":
+                name = os.path.basename(act["image"])
+                self.listbox.insert(tk.END, f"{i + 1}. [클릭] {name}")
+            elif act["type"] == "type":
+                name = os.path.basename(act["image"])
+                self.listbox.insert(tk.END, f"{i + 1}. [입력] {name} -> '{act['text']}'")
+            elif act["type"] == "key":
+                self.listbox.insert(tk.END, f"{i + 1}. [키보드] {act['key']}")
+            elif act["type"] == "wait":
+                self.listbox.insert(tk.END, f"{i + 1}. [대기] {act['time']}초")
+
+    # --- 안전한 설정 저장 및 로드 ---
+    def save_config(self):
+        data = {
+            "settings": {
+                "default_delay": self.delay_var.get(),
+                "tray_enabled": self.tray_enabled.get(),
+            },
+            "schedules": self.schedules,
+            "processes": self.processes
+        }
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def load_config(self):
+        self.processes = {"기본 프로세스": []}
+        self.default_delay = 2.0
+        self.schedules = {}
+
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                    if isinstance(data, list):
+                        self.processes = {"기본 프로세스": data}
+                    elif isinstance(data, dict):
+                        if "processes" in data:
+                            self.processes = data["processes"]
+                            settings = data.get("settings", {})
+                            self.default_delay = settings.get("default_delay", 2.0)
+                            self.tray_enabled.set(settings.get("tray_enabled", False))
+                            self.schedules = data.get("schedules", {})
+                        else:
+                            self.processes = data
+            except Exception as e:
+                print(f"설정 파일 로드 오류: {e}")
+
+        if self.processes:
+            self.current_process = list(self.processes.keys())[0]
+
+    # --- RPA 실행 제어 ---
+    def start_rpa(self):
+        current_actions = self.processes.get(self.current_process, [])
+        if not current_actions:
+            messagebox.showwarning("경고", "실행할 작업이 없습니다.")
+            return
+
+        global_delay = self.delay_var.get()
+
+        self.is_running = True
+        self.status_label.config(text=f"'{self.current_process}' 진행 중...", fg="red")
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+        self.combo_process.config(state=tk.DISABLED)
+        self.time_entry.config(state=tk.DISABLED)
+
+        threading.Thread(target=self.rpa_task, args=(current_actions, global_delay), daemon=True).start()
+
+    def stop_rpa(self):
+        self.is_running = False
+        self.status_label.config(text="정지 중...", fg="orange")
+
+    def execute_click(self, image_path):
+        try:
+            img = Image.open(image_path)
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.8)
+
+            if location:
+                pyautogui.click(location)
+                time.sleep(0.5)
+                return True
+            return False
+        except Exception as e:
+            print(f"이미지 읽기 오류: {e}")
+            return False
+
+    def rpa_task(self, actions, global_delay):
+        try:
+            for i, act in enumerate(actions):
+                if not self.is_running: break
+
+                self.listbox.selection_clear(0, tk.END)
+                self.listbox.selection_set(i)
+                self.listbox.see(i)
+
+                if act["type"] == "click":
+                    if not self.execute_click(act["image"]):
+                        raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
+
+                elif act["type"] == "type":
+                    if not self.execute_click(act["image"]):
+                        raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
+                    pyperclip.copy(act["text"])
+                    pyautogui.hotkey('ctrl', 'v')
+                    time.sleep(0.5)
+
+                elif act["type"] == "key":
+                    pyautogui.press(act["key"])
+                    time.sleep(0.5)
+
+                elif act["type"] == "wait":
+                    wait_time = act["time"]
+                    elapsed = 0
+                    while elapsed < wait_time:
+                        if not self.is_running: break
+                        time.sleep(0.1)
+                        elapsed += 0.1
+
+                if i < len(actions) - 1 and self.is_running:
+                    delay_elapsed = 0
+                    while delay_elapsed < global_delay:
+                        if not self.is_running: break
+                        time.sleep(0.1)
+                        delay_elapsed += 0.1
+
+            if self.is_running:
+                self.status_label.config(text="작업 완료!", fg="green")
+            else:
+                self.status_label.config(text="사용자 중단", fg="orange")
+
+        except Exception as e:
+            self.status_label.config(text="오류 발생!", fg="red")
+            messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}")
+
+        finally:
+            self.reset_ui()
+
+    def reset_ui(self):
+        self.is_running = False
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.combo_process.config(state="readonly")
+        self.time_entry.config(state=tk.NORMAL)
+        self.root.after(3000, self.update_schedule_ui)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = EMRSequenceApp(root)
+    root.mainloop()
