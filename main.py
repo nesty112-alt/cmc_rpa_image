@@ -133,8 +133,6 @@ class ClickPointSelector:
         self.win.title("클릭 위치 선택 (이미지를 클릭하세요)")
         self.win.transient(parent)
         self.win.grab_set()
-        
-        center_window(self.win)
 
         try:
             self.pil_image = Image.open(image_path)
@@ -144,9 +142,36 @@ class ClickPointSelector:
             self.win.destroy()
             return
 
-        self.canvas = tk.Canvas(self.win, width=self.pil_image.width, height=self.pil_image.height, cursor="hand2")
+        max_w = self.win.winfo_screenwidth() * 0.8
+        max_h = self.win.winfo_screenheight() * 0.8
+        
+        img_w, img_h = self.pil_image.size
+        
+        win_w = min(img_w + 40, max_w)
+        win_h = min(img_h + 120, max_h)
+        
+        self.win.geometry(f"{int(win_w)}x{int(win_h)}")
+        center_window(self.win)
+
+        frame = tk.Frame(self.win)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        h_scroll = tk.Scrollbar(frame, orient="horizontal")
+        v_scroll = tk.Scrollbar(frame, orient="vertical")
+
+        self.canvas = tk.Canvas(frame, width=img_w, height=img_h, cursor="hand2",
+                                xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
+
+        h_scroll.config(command=self.canvas.xview)
+        v_scroll.config(command=self.canvas.yview)
+
+        h_scroll.pack(side="bottom", fill="x")
+        v_scroll.pack(side="right", fill="y")
+        
         self.canvas.create_image(0, 0, anchor="nw", image=self.tk_image)
-        self.canvas.pack(padx=10, pady=10)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
         self.canvas.bind("<Button-1>", self.on_image_click)
 
         info_label = tk.Label(self.win, text="이미지에서 클릭할 지점을 선택하세요.", fg="blue")
@@ -159,7 +184,8 @@ class ClickPointSelector:
         self.parent.wait_window(self.win)
 
     def on_image_click(self, event):
-        self.click_pos = (event.x, event.y)
+        # 캔버스 스크롤 위치를 고려하여 실제 이미지 좌표 계산
+        self.click_pos = (self.canvas.canvasx(event.x), self.canvas.canvasy(event.y))
         self.win.destroy()
 
     def on_close(self):
@@ -199,11 +225,16 @@ class EMRSequenceApp:
         else:
             self.root.geometry("650x750")
             center_window(self.root)
+        
+        if self.window_state == 'zoomed':
+            self.root.state('zoomed')
 
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
+        self.root.minsize(650, 750)
+
 
         self.create_widgets()
-        self.update_listbox()
+        self.update_treeview()
         self.update_schedule_ui()
         self.sync_autostart_checkbox()
 
@@ -269,19 +300,30 @@ class EMRSequenceApp:
 
         middle_frame = tk.Frame(self.root)
         middle_frame.pack(pady=5, fill=tk.BOTH, expand=True, padx=10)
+        middle_frame.rowconfigure(0, weight=1)
+        middle_frame.columnconfigure(0, weight=1)
+
 
         left_frame = tk.Frame(middle_frame)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.listbox = tk.Listbox(left_frame, width=35, height=14)
-        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        columns = ("#", "구분", "내용")
+        self.tree = ttk.Treeview(left_frame, columns=columns, show="headings")
+        self.tree.heading("#", text="번호", anchor="center")
+        self.tree.heading("구분", text="구분", anchor="center")
+        self.tree.heading("내용", text="내용")
+        
+        self.tree.column("#", width=40, anchor="center", stretch=False)
+        self.tree.column("구분", width=120, anchor="center", stretch=False)
+        self.tree.column("내용", width=300, stretch=True)
+        
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        scrollbar = tk.Scrollbar(left_frame, orient="vertical")
-        scrollbar.config(command=self.listbox.yview)
+        scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill="y")
-        self.listbox.config(yscrollcommand=scrollbar.set)
 
-        order_frame = tk.Frame(left_frame)
+        order_frame = tk.Frame(middle_frame)
         order_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         tk.Button(order_frame, text="▲ 위로", command=self.move_up).pack(pady=2, fill=tk.X)
         tk.Button(order_frame, text="▼ 아래로", command=self.move_down).pack(pady=2, fill=tk.X)
@@ -289,18 +331,19 @@ class EMRSequenceApp:
         right_frame = tk.Frame(middle_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
 
-        tk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click, width=17).pack(pady=3)
-        tk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, width=17).pack(pady=3)
-        tk.Button(right_frame, text="+ 키 입력(엔터 등)", command=self.add_key, width=17).pack(pady=3)
-        tk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait, width=17).pack(pady=3)
-        tk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image, width=17, bg="#fffde6").pack(pady=3)
-        tk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, width=17, bg="#e6f7ff").pack(pady=3)
+        tk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click).pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type).pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="+ 키 입력(엔터 등)", command=self.add_key).pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait).pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image, bg="#fffde6").pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, bg="#e6f7ff").pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, bg="#f0f0f0").pack(pady=3, fill=tk.X)
 
-        tk.Button(right_frame, text="선택한 작업 이름 변경", fg="purple", command=self.rename_action, width=17).pack(
-            pady=(15, 3))
+        tk.Button(right_frame, text="선택한 작업 이름 변경", fg="purple", command=self.rename_action).pack(
+            pady=(15, 3), fill=tk.X)
 
-        tk.Button(right_frame, text="선택한 작업(내용) 수정", fg="blue", command=self.edit_action, width=17).pack(pady=3)
-        tk.Button(right_frame, text="선택한 작업 삭제", fg="red", command=self.delete_action, width=17).pack(pady=3)
+        tk.Button(right_frame, text="선택한 작업(내용) 수정", fg="blue", command=self.edit_action).pack(pady=3, fill=tk.X)
+        tk.Button(right_frame, text="선택한 작업 삭제", fg="red", command=self.delete_action).pack(pady=3, fill=tk.X)
 
         bottom_frame = tk.Frame(self.root)
         bottom_frame.pack(pady=10, fill=tk.X, padx=10)
@@ -372,7 +415,7 @@ class EMRSequenceApp:
 
     def on_process_change(self, event=None):
         self.current_process = self.combo_process.get()
-        self.update_listbox()
+        self.update_treeview()
         self.update_schedule_ui()
 
     def update_schedule_ui(self):
@@ -449,7 +492,7 @@ class EMRSequenceApp:
             self.processes[new_name] = []
             self.current_process = new_name
             self.update_combo_box()
-            self.update_listbox()
+            self.update_treeview()
             self.update_schedule_ui()
             self.save_config()
 
@@ -479,7 +522,7 @@ class EMRSequenceApp:
                 del self.schedules[self.current_process]
             self.current_process = list(self.processes.keys())[0]
             self.update_combo_box()
-            self.update_listbox()
+            self.update_treeview()
             self.update_schedule_ui()
             self.save_config()
 
@@ -527,34 +570,70 @@ class EMRSequenceApp:
             return file_path, click_pos
 
         return None, None
+    
+    def get_image_path_for_wait(self, is_edit=False, current_action=None):
+        file_path = None
+        if is_edit:
+            msg = "기존 이미지를 변경하시겠습니까?\n\n[예] 새로 직접 화면 캡쳐\n[아니오] 새 파일 선택\n[취소] 기존 이미지 유지"
+        else:
+            msg = "이미지를 어떻게 지정하시겠습니까?\n\n[예] 화면 직접 캡쳐 (추천)\n[아니오] 기존 이미지 파일 선택\n[취소] 작업 취소"
+
+        choice = messagebox.askyesnocancel("이미지 지정", msg)
+
+        if choice is True:
+            self.root.withdraw()
+            self.root.update_idletasks()
+            snipper = SnippingTool(self.root)
+            self.root.wait_window(snipper.snip_window)
+            self.root.deiconify()
+
+            if snipper.result_img:
+                process_capture_dir = os.path.join(application_path, "captures", self.current_process)
+                os.makedirs(process_capture_dir, exist_ok=True)
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_path = os.path.join(process_capture_dir, f"cap_{timestamp}.png")
+                snipper.result_img.save(file_path)
+                return file_path
+
+        elif choice is False:
+            return filedialog.askopenfilename(title="이미지 선택", filetypes=[("Image files", "*.png *.jpg")])
+        
+        else:
+            if is_edit and current_action:
+                return current_action.get("image")
+            return None
+        return None
 
     def add_click(self):
         file_path, click_pos = self.get_image_and_click_pos()
         if file_path:
-            action = {"type": "click", "image": file_path, "alias": "", "click_pos": click_pos}
+            click_type = "double" if messagebox.askquestion("클릭 유형", "더블클릭 하시겠습니까?", parent=self.root) == 'yes' else "single"
+            action = {"type": "click", "image": file_path, "alias": "", "click_pos": click_pos, "click_type": click_type}
             self.processes[self.current_process].append(action)
-            self.update_listbox()
+            self.update_treeview()
             self.save_config()
 
     def add_type(self):
         file_path, click_pos = self.get_image_and_click_pos()
         if file_path:
+            click_type = "double" if messagebox.askquestion("클릭 유형", "더블클릭 하시겠습니까?", parent=self.root) == 'yes' else "single"
             text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:", parent=self.root)
             if text is not None:
-                action = {"type": "type", "image": file_path, "text": text, "alias": "", "click_pos": click_pos}
+                action = {"type": "type", "image": file_path, "text": text, "alias": "", "click_pos": click_pos, "click_type": click_type}
                 self.processes[self.current_process].append(action)
-                self.update_listbox()
+                self.update_treeview()
                 self.save_config()
 
     def add_wait_image(self):
-        file_path, _ = self.get_image_and_click_pos()
+        file_path = self.get_image_path_for_wait()
         if file_path:
             timeout = simpledialog.askfloat("타임아웃 설정", "이미지가 나타날 때까지 기다릴 최대 시간(초)을 입력하세요\n(예: 10초 이내에 안 나타나면 오류 처리):",
                                             initialvalue=10.0, parent=self.root)
             if timeout is not None:
                 action = {"type": "wait_image", "image": file_path, "timeout": timeout, "alias": ""}
                 self.processes[self.current_process].append(action)
-                self.update_listbox()
+                self.update_treeview()
                 self.save_config()
 
     def add_key(self):
@@ -562,7 +641,7 @@ class EMRSequenceApp:
         if key:
             action = {"type": "key", "key": key.lower(), "alias": ""}
             self.processes[self.current_process].append(action)
-            self.update_listbox()
+            self.update_treeview()
             self.save_config()
 
     def add_wait(self):
@@ -570,7 +649,7 @@ class EMRSequenceApp:
         if sec is not None:
             action = {"type": "wait", "time": sec, "alias": ""}
             self.processes[self.current_process].append(action)
-            self.update_listbox()
+            self.update_treeview()
             self.save_config()
 
     def add_exec_file(self):
@@ -578,16 +657,24 @@ class EMRSequenceApp:
         if file_path:
             action = {"type": "exec_file", "path": file_path, "alias": ""}
             self.processes[self.current_process].append(action)
-            self.update_listbox()
+            self.update_treeview()
+            self.save_config()
+    
+    def add_open_path(self):
+        dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택")
+        if dir_path:
+            action = {"type": "open_path", "path": dir_path, "alias": ""}
+            self.processes[self.current_process].append(action)
+            self.update_treeview()
             self.save_config()
 
     def rename_action(self):
-        selected = self.listbox.curselection()
-        if not selected:
+        selected_item = self.tree.selection()
+        if not selected_item:
             messagebox.showwarning("선택 오류", "이름을 변경할 작업을 선택해주세요.")
             return
 
-        idx = selected[0]
+        idx = self.tree.index(selected_item[0])
         act = self.processes[self.current_process][idx]
         current_alias = act.get("alias", "")
 
@@ -599,16 +686,16 @@ class EMRSequenceApp:
 
         if new_alias is not None:
             act["alias"] = new_alias.strip()
-            self.update_listbox()
+            self.update_treeview()
             self.save_config()
 
     def edit_action(self):
-        selected = self.listbox.curselection()
-        if not selected:
+        selected_item = self.tree.selection()
+        if not selected_item:
             messagebox.showwarning("선택 오류", "수정할 작업을 선택해주세요.")
             return
 
-        idx = selected[0]
+        idx = self.tree.index(selected_item[0])
         act = self.processes[self.current_process][idx]
 
         if act["type"] in ["click", "type"]:
@@ -616,13 +703,17 @@ class EMRSequenceApp:
             if file_path:
                 act["image"] = file_path
                 act["click_pos"] = click_pos
+            
+            click_type = messagebox.askquestion("클릭 유형", "더블클릭 하시겠습니까?", parent=self.root)
+            act["click_type"] = "double" if click_type == 'yes' else "single"
+
             if act["type"] == "type":
                 new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""), parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
 
         elif act["type"] == "wait_image":
-            file_path, _ = self.get_image_and_click_pos(is_edit=True, current_action=act)
+            file_path = self.get_image_path_for_wait(is_edit=True, current_action=act)
             if file_path:
                 act["image"] = file_path
             new_timeout = simpledialog.askfloat("타임아웃 수정", "새로운 최대 대기 시간(초)을 입력하세요:",
@@ -644,78 +735,111 @@ class EMRSequenceApp:
             new_path = filedialog.askopenfilename(title="실행할 파일 선택", initialfile=act.get("path"))
             if new_path:
                 act["path"] = new_path
+        
+        elif act["type"] == "open_path":
+            new_path = filedialog.askdirectory(title="열고 싶은 폴더 선택", initialdir=act.get("path"))
+            if new_path:
+                act["path"] = new_path
 
-        self.update_listbox()
+        self.update_treeview()
         self.save_config()
 
     def delete_action(self):
-        selected = self.listbox.curselection()
-        if selected:
-            idx = selected[0]
-            del self.processes[self.current_process][idx]
-            self.update_listbox()
+        selected_items = self.tree.selection()
+        if selected_items:
+            for item in selected_items:
+                idx = self.tree.index(item)
+                del self.processes[self.current_process][idx]
+            self.update_treeview()
             self.save_config()
 
     def move_up(self):
-        selected = self.listbox.curselection()
-        if not selected: return
-        idx = selected[0]
-        if idx == 0: return
-        actions = self.processes[self.current_process]
-        actions[idx], actions[idx - 1] = actions[idx - 1], actions[idx]
-        self.update_listbox()
-        self.listbox.selection_set(idx - 1)
-        self.save_config()
+        selected_item = self.tree.selection()
+        if not selected_item: return
+        
+        item = selected_item[0]
+        idx = self.tree.index(item)
+        if idx > 0:
+            self.tree.move(item, "", idx - 1)
+            actions = self.processes[self.current_process]
+            actions.insert(idx - 1, actions.pop(idx))
+            self.save_config()
+            self.update_treeview() # 번호 다시 매기기
+            new_selection = self.tree.get_children()[idx-1]
+            self.tree.selection_set(new_selection)
+            self.tree.focus(new_selection)
+
 
     def move_down(self):
-        selected = self.listbox.curselection()
-        if not selected: return
-        idx = selected[0]
-        actions = self.processes[self.current_process]
-        if idx == len(actions) - 1: return
-        actions[idx], actions[idx + 1] = actions[idx + 1], actions[idx]
-        self.update_listbox()
-        self.listbox.selection_set(idx + 1)
-        self.save_config()
+        selected_item = self.tree.selection()
+        if not selected_item: return
 
-    def update_listbox(self):
-        self.listbox.delete(0, tk.END)
+        item = selected_item[0]
+        idx = self.tree.index(item)
+        if idx < len(self.processes[self.current_process]) - 1:
+            self.tree.move(item, "", idx + 1)
+            actions = self.processes[self.current_process]
+            actions.insert(idx + 1, actions.pop(idx))
+            self.save_config()
+            self.update_treeview() # 번호 다시 매기기
+            new_selection = self.tree.get_children()[idx+1]
+            self.tree.selection_set(new_selection)
+            self.tree.focus(new_selection)
+
+
+    def update_treeview(self):
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+            
         current_actions = self.processes.get(self.current_process, [])
         for i, act in enumerate(current_actions):
             alias = act.get("alias", "")
-            display_text = ""
+            
+            act_type_display = ""
+            content_display = ""
 
             if act["type"] == "click":
-                display = alias if alias else os.path.basename(act["image"])
-                display_text = f"{i + 1}. [클릭] {display}"
+                act_type_display = "[더블클릭]" if act.get("click_type") == "double" else "[클릭]"
+                content_display = alias if alias else os.path.basename(act["image"])
             elif act["type"] == "type":
-                display = alias if alias else f"{os.path.basename(act['image'])} -> '{act['text']}'"
-                display_text = f"{i + 1}. [입력] {display}"
+                act_type_display = "[더블클릭 & 입력]" if act.get("click_type") == "double" else "[클릭 & 입력]"
+                content_display = alias if alias else f"{os.path.basename(act['image'])} -> '{act['text']}'"
             elif act["type"] == "key":
-                display = alias if alias else act['key']
-                display_text = f"{i + 1}. [키보드] {display}"
+                act_type_display = "[키보드]"
+                content_display = alias if alias else act['key']
             elif act["type"] == "wait":
-                display = alias if alias else f"{act['time']}초"
-                display_text = f"{i + 1}. [대기] {display}"
+                act_type_display = "[대기]"
+                content_display = alias if alias else f"{act['time']}초"
             elif act["type"] == "wait_image":
-                display = alias if alias else f"{os.path.basename(act['image'])} (최대 {act['timeout']}초)"
-                display_text = f"{i + 1}. [이미지 확인] {display}"
+                act_type_display = "[이미지 확인]"
+                content_display = alias if alias else f"{os.path.basename(act['image'])} (최대 {act['timeout']}초)"
             elif act["type"] == "exec_file":
-                display = alias if alias else os.path.basename(act["path"])
-                display_text = f"{i + 1}. [파일 실행] {display}"
+                act_type_display = "[파일 실행]"
+                content_display = alias if alias else os.path.basename(act["path"])
+            elif act["type"] == "open_path":
+                act_type_display = "[경로 열기]"
+                content_display = alias if alias else os.path.basename(act["path"])
 
-            self.listbox.insert(tk.END, display_text)
+            tags = ()
             if act.get("click_pos"):
-                self.listbox.itemconfig(i, {'fg': 'purple'})
+                tags = ('has_click_pos',)
+                self.tree.tag_configure('has_click_pos', foreground='purple')
+
+            self.tree.insert("", "end", values=(i + 1, act_type_display, content_display), tags=tags)
 
 
     def save_config(self):
+        geometry = ""
+        if self.root.state() == 'normal':
+            geometry = self.root.geometry()
+
         data = {
             "settings": {
                 "default_delay": self.delay_var.get(),
                 "tray_enabled": self.tray_enabled.get(),
                 "autostart_enabled": self.autostart_enabled.get(),
-                "window_geometry": self.root.geometry(),
+                "window_geometry": geometry,
+                "window_state": self.root.state(),
                 "confidence": self.confidence_var.get()
             },
             "schedules": self.schedules,
@@ -733,6 +857,7 @@ class EMRSequenceApp:
         self.default_delay = 2.0
         self.schedules = {}
         self.window_geometry = ""
+        self.window_state = "normal"
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -745,6 +870,7 @@ class EMRSequenceApp:
                     self.default_delay = settings.get("default_delay", 2.0)
                     self.tray_enabled.set(settings.get("tray_enabled", False))
                     self.window_geometry = settings.get("window_geometry", "")
+                    self.window_state = settings.get("window_state", "normal")
                     self.confidence_var.set(settings.get("confidence", 0.8))
                     
                     loaded_schedules = data.get("schedules", {})
@@ -767,6 +893,8 @@ class EMRSequenceApp:
                     act["alias"] = ""
                 if "click_pos" not in act:
                     act["click_pos"] = None
+                if "click_type" not in act:
+                    act["click_type"] = "single"
 
     def schedule_checker(self):
         while True:
@@ -806,7 +934,7 @@ class EMRSequenceApp:
     def execute_scheduled_task(self, proc_name):
         self.current_process = proc_name
         self.update_combo_box()
-        self.update_listbox()
+        self.update_treeview()
         self.start_rpa()
 
     def on_closing(self):
@@ -901,17 +1029,22 @@ class EMRSequenceApp:
         self.is_running = False
         self.status_label.config(text="정지 중...", fg="orange")
 
-    def execute_click(self, image_path, click_pos):
+    def execute_click(self, image_path, click_pos, click_type="single"):
         try:
             img = Image.open(image_path)
             location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get())
             if location:
+                click_x = location.left + location.width / 2
+                click_y = location.top + location.height / 2
                 if click_pos:
                     click_x = location.left + click_pos[0]
                     click_y = location.top + click_pos[1]
-                    pyautogui.click(click_x, click_y)
+                
+                if click_type == "double":
+                    pyautogui.doubleClick(click_x, click_y)
                 else:
-                    pyautogui.click(location.left + location.width / 2, location.top + location.height / 2)
+                    pyautogui.click(click_x, click_y)
+
                 time.sleep(0.5)
                 return True
             return False
@@ -943,16 +1076,16 @@ class EMRSequenceApp:
             for i, act in enumerate(actions):
                 if not self.is_running: break
 
-                self.listbox.selection_clear(0, tk.END)
-                self.listbox.selection_set(i)
-                self.listbox.see(i)
+                item_id = self.tree.get_children()[i]
+                self.tree.selection_set(item_id)
+                self.tree.see(item_id)
 
                 if act["type"] == "click":
-                    if not self.execute_click(act["image"], act.get("click_pos")):
+                    if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
 
                 elif act["type"] == "type":
-                    if not self.execute_click(act["image"], act.get("click_pos")):
+                    if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
                     time.sleep(0.5)
                     self.type_text_char_by_char(act["text"])
@@ -1000,6 +1133,12 @@ class EMRSequenceApp:
                         os.startfile(act["path"])
                     except Exception as e:
                         raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
+                
+                elif act["type"] == "open_path":
+                    try:
+                        os.startfile(act["path"])
+                    except Exception as e:
+                        raise Exception(f"경로를 열 수 없습니다: {os.path.basename(act['path'])}\n{e}")
 
 
                 if i < len(actions) - 1 and self.is_running:
