@@ -42,9 +42,10 @@ try:
 except ImportError:
     WINREG_AVAILABLE = False
 
-# 바로가기(.lnk) 해석을 위한 pywin32
+# 바로가기(.lnk) 해석 및 ShellExecute를 위한 pywin32
 try:
     import win32com.client
+    import win32api
     PYWIN32_AVAILABLE = True
 except ImportError:
     PYWIN32_AVAILABLE = False
@@ -1007,7 +1008,10 @@ class EMRSequenceApp:
                 elif act["type"] == "exec_file":
                     try:
                         target_path = self.resolve_shortcut(act["path"])
-                        os.startfile(target_path)
+                        if PYWIN32_AVAILABLE:
+                            win32api.ShellExecute(0, "open", target_path, None, None, 1)
+                        else:
+                            os.startfile(target_path)
                     except Exception as e:
                         raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
 
