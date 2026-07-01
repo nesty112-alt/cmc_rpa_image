@@ -938,15 +938,15 @@ class EMRSequenceApp:
             except Exception:
                 pass
 
-    def resolve_shortcut(self, path):
+    def resolve_shortcut_details(self, path):
         if PYWIN32_AVAILABLE and path.lower().endswith('.lnk'):
             try:
                 shell = win32com.client.Dispatch("WScript.Shell")
                 shortcut = shell.CreateShortCut(path)
-                return shortcut.TargetPath
+                return shortcut.TargetPath, shortcut.Arguments, shortcut.WorkingDirectory
             except Exception as e:
                 print(f"바로가기 해석 오류: {e}")
-        return path
+        return path, "", os.path.dirname(path)
 
     def rpa_task(self, actions, global_delay):
         try:
@@ -1007,11 +1007,11 @@ class EMRSequenceApp:
                 
                 elif act["type"] == "exec_file":
                     try:
-                        target_path = self.resolve_shortcut(act["path"])
+                        target_path, args, work_dir = self.resolve_shortcut_details(act["path"])
                         if PYWIN32_AVAILABLE:
-                            win32api.ShellExecute(0, "open", target_path, None, None, 1)
+                            win32api.ShellExecute(0, "open", target_path, args, work_dir, 1)
                         else:
-                            os.startfile(target_path)
+                            os.startfile(act["path"]) # fallback
                     except Exception as e:
                         raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
 
