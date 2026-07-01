@@ -10,6 +10,15 @@ import pyperclip
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 
+# --- 유틸리티 함수 ---
+def center_window(win):
+    win.update_idletasks()
+    width = win.winfo_width()
+    height = win.winfo_height()
+    x = (win.winfo_screenwidth() // 2) - (width // 2)
+    y = (win.winfo_screenheight() // 2) - (height // 2)
+    win.geometry(f'{width}x{height}+{x}+{y}')
+
 # Windows 디스플레이 확대/축소(DPI) 설정 시 캡쳐 영역 어긋남 방지
 try:
     import ctypes
@@ -32,6 +41,14 @@ try:
     WINREG_AVAILABLE = True
 except ImportError:
     WINREG_AVAILABLE = False
+
+# 바로가기(.lnk) 해석을 위한 pywin32
+try:
+    import win32com.client
+    PYWIN32_AVAILABLE = True
+except ImportError:
+    PYWIN32_AVAILABLE = False
+
 
 APP_NAME = "EMR_Sequencer"
 
@@ -115,6 +132,8 @@ class ClickPointSelector:
         self.win.title("클릭 위치 선택 (이미지를 클릭하세요)")
         self.win.transient(parent)
         self.win.grab_set()
+        
+        center_window(self.win)
 
         try:
             self.pil_image = Image.open(image_path)
@@ -152,9 +171,7 @@ class EMRSequenceApp:
     def __init__(self, root):
         self.root = root
         self.root.title("EMR 자동화 시퀀서")
-        self.root.geometry("650x750") # 창 높이 증가
-        self.root.resizable(False, False)
-
+        
         self.is_running = False
         self.tray_icon = None
 
@@ -164,6 +181,7 @@ class EMRSequenceApp:
         self.schedules = {}
         self.tray_enabled = tk.BooleanVar(value=False)
         self.autostart_enabled = tk.BooleanVar(value=False)
+        self.confidence_var = tk.DoubleVar(value=0.8)
 
         self.last_run_date = {}
         
@@ -173,8 +191,16 @@ class EMRSequenceApp:
         self.boot_minute_var = tk.StringVar(value="05")
         self.boot_second_var = tk.StringVar(value="00")
 
-
         self.load_config()
+        
+        if self.window_geometry:
+            self.root.geometry(self.window_geometry)
+        else:
+            self.root.geometry("650x750")
+            center_window(self.root)
+
+        self.root.resizable(False, False)
+
         self.create_widgets()
         self.update_listbox()
         self.update_schedule_ui()
@@ -202,12 +228,10 @@ class EMRSequenceApp:
         tk.Button(top_frame, text="삭제", command=self.delete_process).grid(row=0, column=5, padx=2, pady=2)
         tk.Button(top_frame, text="환경설정", command=self.open_settings_window).grid(row=0, column=6, padx=(10, 2), pady=2, sticky="e")
 
-        # --- 예약 프레임 ---
         schedule_frame = ttk.LabelFrame(self.root, text="프로세스 실행 예약", padding=(10, 5))
         schedule_frame.pack(fill=tk.X, padx=10, pady=5)
         schedule_frame.columnconfigure(1, weight=1)
 
-        # 예약 타입 선택
         self.time_radio = ttk.Radiobutton(schedule_frame, text="특정 시간 (HH:MM)", variable=self.schedule_type_var, value="time", command=self.toggle_schedule_widgets)
         self.time_radio.grid(row=0, column=0, sticky="w", padx=5)
 
@@ -216,7 +240,6 @@ class EMRSequenceApp:
         if not GET_TICK_COUNT_AVAILABLE:
             self.boot_radio.config(state=tk.DISABLED)
 
-        # 특정 시간 입력
         self.time_input_frame = tk.Frame(schedule_frame)
         self.time_input_frame.grid(row=0, column=1, sticky="w")
         self.hour_spin = tk.Spinbox(self.time_input_frame, from_=0, to=23, textvariable=self.hour_var, width=3, format="%02.0f")
@@ -225,7 +248,6 @@ class EMRSequenceApp:
         self.minute_spin = tk.Spinbox(self.time_input_frame, from_=0, to=59, textvariable=self.minute_var, width=3, format="%02.0f")
         self.minute_spin.pack(side=tk.LEFT)
 
-        # 부팅 후 시간 입력
         self.boot_input_frame = tk.Frame(schedule_frame)
         self.boot_input_frame.grid(row=1, column=1, sticky="w")
         self.boot_minute_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_minute_var, width=3, format="%02.0f")
@@ -234,7 +256,6 @@ class EMRSequenceApp:
         self.boot_second_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_second_var, width=3, format="%02.0f")
         self.boot_second_spin.pack(side=tk.LEFT)
 
-        # 예약 버튼
         btn_frame = tk.Frame(schedule_frame)
         btn_frame.grid(row=0, column=2, rowspan=2, padx=(10,0))
         tk.Button(btn_frame, text="예약 저장", command=self.save_schedule, bg="#e6ffe6").pack(fill=tk.X, pady=2)
@@ -309,7 +330,7 @@ class EMRSequenceApp:
                 child.configure(state='normal')
             for child in self.boot_input_frame.winfo_children():
                 child.configure(state='disabled')
-        else: # boot
+        else:
             for child in self.time_input_frame.winfo_children():
                 child.configure(state='disabled')
             for child in self.boot_input_frame.winfo_children():
@@ -318,10 +339,12 @@ class EMRSequenceApp:
     def open_settings_window(self):
         settings_win = tk.Toplevel(self.root)
         settings_win.title("환경설정")
-        settings_win.geometry("300x150")
+        settings_win.geometry("300x200")
         settings_win.resizable(False, False)
         settings_win.transient(self.root)
         settings_win.grab_set()
+        
+        center_window(settings_win)
 
         frame = tk.Frame(settings_win, padx=10, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
@@ -334,6 +357,14 @@ class EMRSequenceApp:
         autostart_cb.pack(anchor="w", pady=5)
         if not WINREG_AVAILABLE:
             autostart_cb.config(state=tk.DISABLED)
+
+        confidence_label = tk.Label(frame, text=f"이미지 인식 정확도: {self.confidence_var.get():.2f}")
+        confidence_label.pack(anchor="w", pady=(10, 0))
+        confidence_scale = tk.Scale(frame, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.confidence_var,
+                                    command=lambda val: confidence_label.config(text=f"이미지 인식 정확도: {float(val):.2f}"))
+        confidence_scale.pack(fill=tk.X)
+        confidence_scale.bind("<ButtonRelease-1>", lambda e: self.save_config())
+
 
         close_btn = tk.Button(frame, text="닫기", command=settings_win.destroy)
         close_btn.pack(pady=10)
@@ -409,7 +440,7 @@ class EMRSequenceApp:
             messagebox.showinfo("예약 취소", "예약이 취소되었습니다.")
 
     def add_process(self):
-        new_name = simpledialog.askstring("새 프로세스", "새로운 프로세스의 이름을 입력하세요:")
+        new_name = simpledialog.askstring("새 프로세스", "새로운 프로세스의 이름을 입력하세요:", parent=self.root)
         if new_name:
             if new_name in self.processes:
                 messagebox.showwarning("경고", "이미 존재하는 프로세스 이름입니다.")
@@ -423,7 +454,7 @@ class EMRSequenceApp:
 
     def rename_process(self):
         old_name = self.current_process
-        new_name = simpledialog.askstring("이름 변경", "새로운 프로세스 이름을 입력하세요:", initialvalue=old_name)
+        new_name = simpledialog.askstring("이름 변경", "새로운 프로세스 이름을 입력하세요:", initialvalue=old_name, parent=self.root)
         if new_name and new_name != old_name:
             if new_name in self.processes:
                 messagebox.showwarning("경고", "이미 존재하는 프로세스 이름입니다.")
@@ -507,7 +538,7 @@ class EMRSequenceApp:
     def add_type(self):
         file_path, click_pos = self.get_image_and_click_pos()
         if file_path:
-            text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:")
+            text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:", parent=self.root)
             if text is not None:
                 action = {"type": "type", "image": file_path, "text": text, "alias": "", "click_pos": click_pos}
                 self.processes[self.current_process].append(action)
@@ -518,7 +549,7 @@ class EMRSequenceApp:
         file_path, _ = self.get_image_and_click_pos()
         if file_path:
             timeout = simpledialog.askfloat("타임아웃 설정", "이미지가 나타날 때까지 기다릴 최대 시간(초)을 입력하세요\n(예: 10초 이내에 안 나타나면 오류 처리):",
-                                            initialvalue=10.0)
+                                            initialvalue=10.0, parent=self.root)
             if timeout is not None:
                 action = {"type": "wait_image", "image": file_path, "timeout": timeout, "alias": ""}
                 self.processes[self.current_process].append(action)
@@ -526,7 +557,7 @@ class EMRSequenceApp:
                 self.save_config()
 
     def add_key(self):
-        key = simpledialog.askstring("키보드 입력", "입력할 키를 적어주세요 (예: enter, tab, esc):")
+        key = simpledialog.askstring("키보드 입력", "입력할 키를 적어주세요 (예: enter, tab, esc):", parent=self.root)
         if key:
             action = {"type": "key", "key": key.lower(), "alias": ""}
             self.processes[self.current_process].append(action)
@@ -534,7 +565,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def add_wait(self):
-        sec = simpledialog.askfloat("대기 시간", "기다릴 시간(초)을 입력하세요 (예: 1.5):")
+        sec = simpledialog.askfloat("대기 시간", "기다릴 시간(초)을 입력하세요 (예: 1.5):", parent=self.root)
         if sec is not None:
             action = {"type": "wait", "time": sec, "alias": ""}
             self.processes[self.current_process].append(action)
@@ -562,7 +593,7 @@ class EMRSequenceApp:
         new_alias = simpledialog.askstring(
             "작업 이름 설정",
             "이 작업이 리스트에 표시될 이름을 입력하세요:\n(예: '로그인 버튼 클릭')\n\n※ 비워두면 기본 파일명/값으로 표시됩니다.",
-            initialvalue=current_alias
+            initialvalue=current_alias, parent=self.root
         )
 
         if new_alias is not None:
@@ -585,7 +616,7 @@ class EMRSequenceApp:
                 act["image"] = file_path
                 act["click_pos"] = click_pos
             if act["type"] == "type":
-                new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""))
+                new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""), parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
 
@@ -594,17 +625,17 @@ class EMRSequenceApp:
             if file_path:
                 act["image"] = file_path
             new_timeout = simpledialog.askfloat("타임아웃 수정", "새로운 최대 대기 시간(초)을 입력하세요:",
-                                                initialvalue=act.get("timeout", 10.0))
+                                                initialvalue=act.get("timeout", 10.0), parent=self.root)
             if new_timeout is not None:
                 act["timeout"] = new_timeout
 
         elif act["type"] == "key":
-            new_key = simpledialog.askstring("키보드 입력 수정", "새로운 키를 입력하세요:", initialvalue=act.get("key", ""))
+            new_key = simpledialog.askstring("키보드 입력 수정", "새로운 키를 입력하세요:", initialvalue=act.get("key", ""), parent=self.root)
             if new_key:
                 act["key"] = new_key.lower()
 
         elif act["type"] == "wait":
-            new_time = simpledialog.askfloat("대기 시간 수정", "새로운 대기 시간(초)을 입력하세요:", initialvalue=act.get("time", 1.0))
+            new_time = simpledialog.askfloat("대기 시간 수정", "새로운 대기 시간(초)을 입력하세요:", initialvalue=act.get("time", 1.0), parent=self.root)
             if new_time is not None:
                 act["time"] = new_time
         
@@ -683,6 +714,8 @@ class EMRSequenceApp:
                 "default_delay": self.delay_var.get(),
                 "tray_enabled": self.tray_enabled.get(),
                 "autostart_enabled": self.autostart_enabled.get(),
+                "window_geometry": self.root.geometry(),
+                "confidence": self.confidence_var.get()
             },
             "schedules": self.schedules,
             "processes": self.processes
@@ -698,6 +731,7 @@ class EMRSequenceApp:
         self.processes = {"기본 프로세스": []}
         self.default_delay = 2.0
         self.schedules = {}
+        self.window_geometry = ""
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -709,8 +743,9 @@ class EMRSequenceApp:
                     settings = data.get("settings", {})
                     self.default_delay = settings.get("default_delay", 2.0)
                     self.tray_enabled.set(settings.get("tray_enabled", False))
+                    self.window_geometry = settings.get("window_geometry", "")
+                    self.confidence_var.set(settings.get("confidence", 0.8))
                     
-                    # 호환성 유지를 위한 스케줄 정보 변환
                     loaded_schedules = data.get("schedules", {})
                     for proc, val in loaded_schedules.items():
                         if isinstance(val, str):
@@ -756,7 +791,6 @@ class EMRSequenceApp:
                     try:
                         minutes, seconds = map(int, schedule_value.split(':'))
                         target_seconds = minutes * 60 + seconds
-                        # 부팅 후 10초 이내에 실행된 경우, 오차를 감안하여 실행
                         if abs(uptime_seconds - target_seconds) < 10:
                             should_run = True
                     except (ValueError, TypeError):
@@ -775,6 +809,7 @@ class EMRSequenceApp:
         self.start_rpa()
 
     def on_closing(self):
+        self.save_config()
         if self.tray_enabled.get():
             self.root.withdraw()
             self.show_tray_icon()
@@ -868,7 +903,7 @@ class EMRSequenceApp:
     def execute_click(self, image_path, click_pos):
         try:
             img = Image.open(image_path)
-            location = pyautogui.locateOnScreen(img, confidence=0.8)
+            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get())
             if location:
                 if click_pos:
                     click_x = location.left + click_pos[0]
@@ -901,6 +936,16 @@ class EMRSequenceApp:
                 pyperclip.copy(original_clipboard)
             except Exception:
                 pass
+
+    def resolve_shortcut(self, path):
+        if PYWIN32_AVAILABLE and path.lower().endswith('.lnk'):
+            try:
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shortcut = shell.CreateShortCut(path)
+                return shortcut.TargetPath
+            except Exception as e:
+                print(f"바로가기 해석 오류: {e}")
+        return path
 
     def rpa_task(self, actions, global_delay):
         try:
@@ -948,7 +993,7 @@ class EMRSequenceApp:
                     while time.time() - start_time < timeout:
                         if not self.is_running: break
                         try:
-                            location = pyautogui.locateOnScreen(img, confidence=0.8)
+                            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get())
                             if location:
                                 found = True
                                 break
@@ -961,7 +1006,8 @@ class EMRSequenceApp:
                 
                 elif act["type"] == "exec_file":
                     try:
-                        os.startfile(act["path"])
+                        target_path = self.resolve_shortcut(act["path"])
+                        os.startfile(target_path)
                     except Exception as e:
                         raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
 
@@ -990,7 +1036,7 @@ class EMRSequenceApp:
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
         self.combo_process.config(state="readonly")
-        self.toggle_schedule_widgets() # 예약 위젯 상태 업데이트
+        self.toggle_schedule_widgets()
         self.root.after(3000, self.update_schedule_ui)
 
 
