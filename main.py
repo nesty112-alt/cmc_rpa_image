@@ -124,13 +124,14 @@ class SnippingTool:
 
 # --- 클릭 위치 선택을 위한 클래스 ---
 class ClickPointSelector:
-    def __init__(self, parent, image_path):
+    def __init__(self, parent, image_path, current_click_type="single"):
         self.parent = parent
         self.image_path = image_path
         self.click_pos = None
+        self.click_type = current_click_type
 
         self.win = tk.Toplevel(parent)
-        self.win.title("클릭 위치 선택 (이미지를 클릭하세요)")
+        self.win.title("클릭 위치 및 유형 선택")
         self.win.transient(parent)
         self.win.grab_set()
 
@@ -148,7 +149,7 @@ class ClickPointSelector:
         img_w, img_h = self.pil_image.size
         
         win_w = min(img_w + 40, max_w)
-        win_h = min(img_h + 120, max_h)
+        win_h = min(img_h + 160, max_h)
         
         self.win.geometry(f"{int(win_w)}x{int(win_h)}")
         center_window(self.win)
@@ -176,21 +177,26 @@ class ClickPointSelector:
 
         info_label = tk.Label(self.win, text="이미지에서 클릭할 지점을 선택하세요.", fg="blue")
         info_label.pack(pady=5)
+        
+        self.double_click_var = tk.BooleanVar(value=(current_click_type == "double"))
+        double_click_cb = ttk.Checkbutton(self.win, text="더블 클릭", variable=self.double_click_var)
+        double_click_cb.pack(pady=5)
 
-        close_button = tk.Button(self.win, text="닫기 (기본값: 중앙)", command=self.on_close, font=("맑은 고딕", 10))
+        close_button = tk.Button(self.win, text="확인 (기본값: 중앙)", command=self.on_close, font=("맑은 고딕", 10))
         close_button.pack(pady=(5, 10), ipadx=10, ipady=4)
 
         self.win.protocol("WM_DELETE_WINDOW", self.on_close)
         self.parent.wait_window(self.win)
 
     def on_image_click(self, event):
-        # 캔버스 스크롤 위치를 고려하여 실제 이미지 좌표 계산
         self.click_pos = (self.canvas.canvasx(event.x), self.canvas.canvasy(event.y))
+        self.click_type = "double" if self.double_click_var.get() else "single"
         self.win.destroy()
 
     def on_close(self):
         if not self.click_pos:
             self.click_pos = (self.pil_image.width // 2, self.pil_image.height // 2)
+        self.click_type = "double" if self.double_click_var.get() else "single"
         self.win.destroy()
 
 
@@ -199,6 +205,21 @@ class EMRSequenceApp:
         self.root = root
         self.root.title("EMR 자동화 시퀀서")
         
+        # 스타일 설정
+        style = ttk.Style()
+        style.configure("TButton", font=("맑은 고딕", 9))
+        style.configure("TLabel", font=("맑은 고딕", 9))
+        style.configure("TCheckbutton", font=("맑은 고딕", 9))
+        style.configure("TRadiobutton", font=("맑은 고딕", 9))
+        style.configure("TCombobox", font=("맑은 고딕", 9))
+        style.configure("Treeview.Heading", font=("맑은 고딕", 10, "bold"))
+        style.configure("Accent.TButton", font=("맑은 고딕", 9, "bold"))
+        
+        style.map('Treeview',
+          foreground=self._fixed_map(style, 'foreground'),
+          background=self._fixed_map(style, 'background'))
+
+
         self.is_running = False
         self.tray_icon = None
 
@@ -232,6 +253,10 @@ class EMRSequenceApp:
         self.root.resizable(True, True)
         self.root.minsize(650, 750)
 
+        # 우클릭 메뉴 생성
+        self.tree_menu = tk.Menu(self.root, tearoff=0)
+        self.tree_menu.add_command(label="선택 항목 활성화", command=lambda: self.set_actions_enabled(True))
+        self.tree_menu.add_command(label="선택 항목 비활성화", command=lambda: self.set_actions_enabled(False))
 
         self.create_widgets()
         self.update_treeview()
@@ -241,13 +266,17 @@ class EMRSequenceApp:
         threading.Thread(target=self.schedule_checker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+    def _fixed_map(self, style, option):
+        return [elm for elm in style.map('Treeview', query_opt=option) if
+                elm[:2] != ('!disabled', '!selected')]
+
     def create_widgets(self):
         """UI 구성"""
-        top_frame = tk.Frame(self.root)
-        top_frame.pack(pady=10, fill=tk.X, padx=10)
+        top_frame = ttk.Frame(self.root, padding=10)
+        top_frame.pack(fill=tk.X)
         top_frame.columnconfigure(6, weight=1)
 
-        tk.Label(top_frame, text="프로세스:").grid(row=0, column=0, padx=2, pady=2, sticky="w")
+        ttk.Label(top_frame, text="프로세스:").grid(row=0, column=0, padx=2, pady=2, sticky="w")
 
         self.combo_process = ttk.Combobox(top_frame, values=list(self.processes.keys()), state="readonly", width=25)
         self.combo_process.grid(row=0, column=1, padx=2, pady=2, columnspan=2)
@@ -255,10 +284,10 @@ class EMRSequenceApp:
             self.combo_process.set(self.current_process)
         self.combo_process.bind("<<ComboboxSelected>>", self.on_process_change)
 
-        tk.Button(top_frame, text="새로 만들기", command=self.add_process).grid(row=0, column=3, padx=2, pady=2)
-        tk.Button(top_frame, text="이름 변경", command=self.rename_process).grid(row=0, column=4, padx=2, pady=2)
-        tk.Button(top_frame, text="삭제", command=self.delete_process).grid(row=0, column=5, padx=2, pady=2)
-        tk.Button(top_frame, text="환경설정", command=self.open_settings_window).grid(row=0, column=6, padx=(10, 2), pady=2, sticky="e")
+        ttk.Button(top_frame, text="새로 만들기", command=self.add_process).grid(row=0, column=3, padx=2, pady=2)
+        ttk.Button(top_frame, text="이름 변경", command=self.rename_process).grid(row=0, column=4, padx=2, pady=2)
+        ttk.Button(top_frame, text="삭제", command=self.delete_process).grid(row=0, column=5, padx=2, pady=2)
+        ttk.Button(top_frame, text="환경설정", command=self.open_settings_window).grid(row=0, column=6, padx=(10, 2), pady=2, sticky="e")
 
         schedule_frame = ttk.LabelFrame(self.root, text="프로세스 실행 예약", padding=(10, 5))
         schedule_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -272,85 +301,98 @@ class EMRSequenceApp:
         if not GET_TICK_COUNT_AVAILABLE:
             self.boot_radio.config(state=tk.DISABLED)
 
-        self.time_input_frame = tk.Frame(schedule_frame)
+        self.time_input_frame = ttk.Frame(schedule_frame)
         self.time_input_frame.grid(row=0, column=1, sticky="w")
         self.hour_spin = tk.Spinbox(self.time_input_frame, from_=0, to=23, textvariable=self.hour_var, width=3, format="%02.0f")
         self.hour_spin.pack(side=tk.LEFT)
-        tk.Label(self.time_input_frame, text=":").pack(side=tk.LEFT, padx=2)
+        ttk.Label(self.time_input_frame, text=":").pack(side=tk.LEFT, padx=2)
         self.minute_spin = tk.Spinbox(self.time_input_frame, from_=0, to=59, textvariable=self.minute_var, width=3, format="%02.0f")
         self.minute_spin.pack(side=tk.LEFT)
 
-        self.boot_input_frame = tk.Frame(schedule_frame)
+        self.boot_input_frame = ttk.Frame(schedule_frame)
         self.boot_input_frame.grid(row=1, column=1, sticky="w")
         self.boot_minute_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_minute_var, width=3, format="%02.0f")
         self.boot_minute_spin.pack(side=tk.LEFT)
-        tk.Label(self.boot_input_frame, text=":").pack(side=tk.LEFT, padx=2)
+        ttk.Label(self.boot_input_frame, text=":").pack(side=tk.LEFT, padx=2)
         self.boot_second_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_second_var, width=3, format="%02.0f")
         self.boot_second_spin.pack(side=tk.LEFT)
 
-        btn_frame = tk.Frame(schedule_frame)
+        btn_frame = ttk.Frame(schedule_frame)
         btn_frame.grid(row=0, column=2, rowspan=2, padx=(10,0))
-        tk.Button(btn_frame, text="예약 저장", command=self.save_schedule, bg="#e6ffe6").pack(fill=tk.X, pady=2)
-        tk.Button(btn_frame, text="예약 취소", command=self.cancel_schedule, bg="#ffe6e6").pack(fill=tk.X, pady=2)
+        ttk.Button(btn_frame, text="예약 저장", command=self.save_schedule, style="Accent.TButton").pack(fill=tk.X, pady=2)
+        ttk.Button(btn_frame, text="예약 취소", command=self.cancel_schedule).pack(fill=tk.X, pady=2)
 
         self.toggle_schedule_widgets()
 
-        self.status_label = tk.Label(self.root, text="대기 중...", font=("맑은 고딕", 11, "bold"), fg="blue")
+        self.status_label = ttk.Label(self.root, text="대기 중...", font=("맑은 고딕", 11, "bold"), foreground="blue")
         self.status_label.pack(pady=2)
 
-        middle_frame = tk.Frame(self.root)
+        middle_frame = ttk.Frame(self.root)
         middle_frame.pack(pady=5, fill=tk.BOTH, expand=True, padx=10)
-        middle_frame.rowconfigure(0, weight=1)
+        middle_frame.rowconfigure(1, weight=1)
         middle_frame.columnconfigure(0, weight=1)
 
+        action_btn_frame = ttk.Frame(middle_frame)
+        action_btn_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
+        ttk.Button(action_btn_frame, text="선택 활성화", command=lambda: self.set_actions_enabled(True)).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(action_btn_frame, text="선택 비활성화", command=lambda: self.set_actions_enabled(False)).pack(side=tk.LEFT)
 
-        left_frame = tk.Frame(middle_frame)
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_container = ttk.Frame(middle_frame)
+        tree_container.grid(row=1, column=0, sticky="nsew")
+        tree_container.rowconfigure(0, weight=1)
+        tree_container.columnconfigure(0, weight=1)
 
-        columns = ("#", "구분", "내용")
-        self.tree = ttk.Treeview(left_frame, columns=columns, show="headings")
+        columns = ("#", "활성", "구분", "내용")
+        self.tree = ttk.Treeview(tree_container, columns=columns, show="headings", selectmode="extended")
         self.tree.heading("#", text="번호", anchor="center")
+        self.tree.heading("활성", text="활성", anchor="center")
         self.tree.heading("구분", text="구분", anchor="center")
         self.tree.heading("내용", text="내용")
         
         self.tree.column("#", width=40, anchor="center", stretch=False)
+        self.tree.column("활성", width=50, anchor="center", stretch=False)
         self.tree.column("구분", width=120, anchor="center", stretch=False)
         self.tree.column("내용", width=300, stretch=True)
         
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tree.grid(row=0, column=0, sticky="nsew")
 
-        scrollbar = tk.Scrollbar(left_frame, orient="vertical", command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.LEFT, fill="y")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        if sys.platform == "darwin":
+            self.tree.bind("<Button-2>", self.show_tree_menu)
+        else:
+            self.tree.bind("<Button-3>", self.show_tree_menu)
 
-        order_frame = tk.Frame(middle_frame)
-        order_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        tk.Button(order_frame, text="▲ 위로", command=self.move_up).pack(pady=2, fill=tk.X)
-        tk.Button(order_frame, text="▼ 아래로", command=self.move_down).pack(pady=2, fill=tk.X)
+        order_frame = ttk.Frame(middle_frame)
+        order_frame.grid(row=1, column=1, sticky="ns", padx=5)
+        ttk.Button(order_frame, text="▲ 위로", command=self.move_up).pack(pady=2, fill=tk.X)
+        ttk.Button(order_frame, text="▼ 아래로", command=self.move_down).pack(pady=2, fill=tk.X)
 
-        right_frame = tk.Frame(middle_frame)
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
+        right_frame = ttk.Frame(middle_frame)
+        right_frame.grid(row=1, column=2, sticky="ns", padx=5)
 
-        tk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click).pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type).pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="+ 키 입력(엔터 등)", command=self.add_key).pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait).pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image, bg="#fffde6").pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, bg="#e6f7ff").pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, bg="#f0f0f0").pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 키 입력(엔터 등)", command=self.add_key).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path).pack(pady=3, fill=tk.X)
 
-        tk.Button(right_frame, text="선택한 작업 이름 변경", fg="purple", command=self.rename_action).pack(
+        ttk.Button(right_frame, text="선택한 작업 이름 변경", command=self.rename_action).pack(
             pady=(15, 3), fill=tk.X)
 
-        tk.Button(right_frame, text="선택한 작업(내용) 수정", fg="blue", command=self.edit_action).pack(pady=3, fill=tk.X)
-        tk.Button(right_frame, text="선택한 작업 삭제", fg="red", command=self.delete_action).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="선택한 작업(내용) 수정", command=self.edit_action).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="선택한 작업 삭제", command=self.delete_action).pack(pady=3, fill=tk.X)
 
-        bottom_frame = tk.Frame(self.root)
+        bottom_frame = ttk.Frame(self.root)
         bottom_frame.pack(pady=10, fill=tk.X, padx=10)
 
-        delay_frame = tk.Frame(bottom_frame)
+        delay_frame = ttk.Frame(bottom_frame)
         delay_frame.pack(side=tk.TOP, pady=5)
-        tk.Label(delay_frame, text="동작 간 기본 대기시간(초):").pack(side=tk.LEFT)
+        ttk.Label(delay_frame, text="동작 간 기본 대기시간(초):").pack(side=tk.LEFT)
 
         self.delay_var = tk.DoubleVar(value=self.default_delay)
         delay_spin = tk.Spinbox(delay_frame, from_=0.0, to=10.0, increment=0.5, textvariable=self.delay_var, width=5,
@@ -358,15 +400,49 @@ class EMRSequenceApp:
         delay_spin.pack(side=tk.LEFT, padx=5)
         delay_spin.bind("<KeyRelease>", lambda e: self.save_config())
 
-        ctrl_frame = tk.Frame(bottom_frame)
+        ctrl_frame = ttk.Frame(bottom_frame)
         ctrl_frame.pack(side=tk.TOP, pady=5)
 
-        self.start_btn = tk.Button(ctrl_frame, text="▶ 시작", width=12, bg="#e6f2ff", command=self.start_rpa)
+        self.start_btn = ttk.Button(ctrl_frame, text="▶ 처음부터 시작", command=self.start_rpa)
         self.start_btn.grid(row=0, column=0, padx=5)
 
-        self.stop_btn = tk.Button(ctrl_frame, text="■ 정지", width=12, bg="#ffe6e6", state=tk.DISABLED,
+        self.start_from_btn = ttk.Button(ctrl_frame, text="▶ 선택부터 시작", command=self.start_from_selected)
+        self.start_from_btn.grid(row=0, column=1, padx=5)
+
+        self.stop_btn = ttk.Button(ctrl_frame, text="■ 정지", state=tk.DISABLED,
                                   command=self.stop_rpa)
-        self.stop_btn.grid(row=0, column=1, padx=5)
+        self.stop_btn.grid(row=0, column=2, padx=5)
+
+    def show_tree_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            if item not in self.tree.selection():
+                self.tree.selection_set(item)
+                self.tree.focus(item)
+            self.tree_menu.post(event.x_root, event.y_root)
+
+    def set_actions_enabled(self, enabled):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("선택 오류", "상태를 변경할 작업을 하나 이상 선택해주세요.")
+            return
+
+        for item_id in selected_items:
+            idx = self.tree.index(item_id)
+            act = self.processes[self.current_process][idx]
+            act["enabled"] = enabled
+        
+        self.save_config()
+        self.update_treeview()
+
+    def start_from_selected(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showwarning("선택 오류", "시작할 작업을 리스트에서 선택해주세요.")
+            return
+        
+        idx = self.tree.index(selected_item[0])
+        self.start_rpa(start_index=idx)
 
     def toggle_schedule_widgets(self):
         if self.schedule_type_var.get() == "time":
@@ -390,19 +466,19 @@ class EMRSequenceApp:
         
         center_window(settings_win)
 
-        frame = tk.Frame(settings_win, padx=10, pady=10)
+        frame = ttk.Frame(settings_win, padding=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        tray_cb = tk.Checkbutton(frame, text="종료 시 트레이로 최소화", variable=self.tray_enabled, command=self.save_config)
+        tray_cb = ttk.Checkbutton(frame, text="종료 시 트레이로 최소화", variable=self.tray_enabled, command=self.save_config)
         tray_cb.pack(anchor="w", pady=5)
 
-        autostart_cb = tk.Checkbutton(frame, text="윈도우 부팅 시 자동 실행", variable=self.autostart_enabled,
+        autostart_cb = ttk.Checkbutton(frame, text="윈도우 부팅 시 자동 실행", variable=self.autostart_enabled,
                                       command=self.toggle_autostart)
         autostart_cb.pack(anchor="w", pady=5)
         if not WINREG_AVAILABLE:
             autostart_cb.config(state=tk.DISABLED)
 
-        confidence_label = tk.Label(frame, text=f"이미지 인식 정확도: {self.confidence_var.get():.2f}")
+        confidence_label = ttk.Label(frame, text=f"이미지 인식 정확도: {self.confidence_var.get():.2f}")
         confidence_label.pack(anchor="w", pady=(10, 0))
         confidence_scale = tk.Scale(frame, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.confidence_var,
                                     command=lambda val: confidence_label.config(text=f"이미지 인식 정확도: {float(val):.2f}"))
@@ -410,7 +486,7 @@ class EMRSequenceApp:
         confidence_scale.bind("<ButtonRelease-1>", lambda e: self.save_config())
 
 
-        close_btn = tk.Button(frame, text="닫기", command=settings_win.destroy)
+        close_btn = ttk.Button(frame, text="닫기", command=settings_win.destroy)
         close_btn.pack(pady=10)
 
     def on_process_change(self, event=None):
@@ -430,20 +506,20 @@ class EMRSequenceApp:
                     hour, minute = schedule_value.split(":")
                     self.hour_var.set(f"{int(hour):02d}")
                     self.minute_var.set(f"{int(minute):02d}")
-                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (매일 {schedule_value})", fg="green")
+                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (매일 {schedule_value})", foreground="green")
                 except (ValueError, TypeError):
-                    self.status_label.config(text="대기 중...", fg="blue")
+                    self.status_label.config(text="대기 중...", foreground="blue")
             elif schedule_type == "boot":
                 try:
                     minute, second = schedule_value.split(":")
                     self.boot_minute_var.set(f"{int(minute):02d}")
                     self.boot_second_var.set(f"{int(second):02d}")
-                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (부팅 후 {schedule_value})", fg="purple")
+                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (부팅 후 {schedule_value})", foreground="purple")
                 except (ValueError, TypeError):
-                     self.status_label.config(text="대기 중...", fg="blue")
+                     self.status_label.config(text="대기 중...", foreground="blue")
         else:
             self.schedule_type_var.set("time")
-            self.status_label.config(text="대기 중...", fg="blue")
+            self.status_label.config(text="대기 중...", foreground="blue")
         
         self.toggle_schedule_widgets()
 
@@ -533,6 +609,10 @@ class EMRSequenceApp:
     def get_image_and_click_pos(self, is_edit=False, current_action=None):
         file_path = None
         click_pos = None
+        click_type = "single"
+
+        if is_edit and current_action:
+            click_type = current_action.get("click_type", "single")
 
         if is_edit:
             msg = "기존 이미지를 변경하시겠습니까?\n\n[예] 새로 직접 화면 캡쳐\n[아니오] 새 파일 선택\n[취소] 기존 이미지 유지"
@@ -559,17 +639,18 @@ class EMRSequenceApp:
         elif choice is False:
             file_path = filedialog.askopenfilename(title="이미지 선택", filetypes=[("Image files", "*.png *.jpg")])
 
-        else:
+        else: # Cancel
             if is_edit and current_action:
-                return current_action.get("image"), current_action.get("click_pos")
-            return None, None
+                return current_action.get("image"), current_action.get("click_pos"), current_action.get("click_type")
+            return None, None, None
 
         if file_path:
-            selector = ClickPointSelector(self.root, file_path)
+            selector = ClickPointSelector(self.root, file_path, current_click_type=click_type)
             click_pos = selector.click_pos
-            return file_path, click_pos
+            click_type = selector.click_type
+            return file_path, click_pos, click_type
 
-        return None, None
+        return None, None, None
     
     def get_image_path_for_wait(self, is_edit=False, current_action=None):
         file_path = None
@@ -606,21 +687,19 @@ class EMRSequenceApp:
         return None
 
     def add_click(self):
-        file_path, click_pos = self.get_image_and_click_pos()
+        file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
-            click_type = "double" if messagebox.askquestion("클릭 유형", "더블클릭 하시겠습니까?", parent=self.root) == 'yes' else "single"
-            action = {"type": "click", "image": file_path, "alias": "", "click_pos": click_pos, "click_type": click_type}
+            action = {"type": "click", "image": file_path, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
 
     def add_type(self):
-        file_path, click_pos = self.get_image_and_click_pos()
+        file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
-            click_type = "double" if messagebox.askquestion("클릭 유형", "더블클릭 하시겠습니까?", parent=self.root) == 'yes' else "single"
             text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:", parent=self.root)
             if text is not None:
-                action = {"type": "type", "image": file_path, "text": text, "alias": "", "click_pos": click_pos, "click_type": click_type}
+                action = {"type": "type", "image": file_path, "text": text, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -631,7 +710,7 @@ class EMRSequenceApp:
             timeout = simpledialog.askfloat("타임아웃 설정", "이미지가 나타날 때까지 기다릴 최대 시간(초)을 입력하세요\n(예: 10초 이내에 안 나타나면 오류 처리):",
                                             initialvalue=10.0, parent=self.root)
             if timeout is not None:
-                action = {"type": "wait_image", "image": file_path, "timeout": timeout, "alias": ""}
+                action = {"type": "wait_image", "image": file_path, "timeout": timeout, "alias": "", "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -639,7 +718,7 @@ class EMRSequenceApp:
     def add_key(self):
         key = simpledialog.askstring("키보드 입력", "입력할 키를 적어주세요 (예: enter, tab, esc):", parent=self.root)
         if key:
-            action = {"type": "key", "key": key.lower(), "alias": ""}
+            action = {"type": "key", "key": key.lower(), "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -647,7 +726,7 @@ class EMRSequenceApp:
     def add_wait(self):
         sec = simpledialog.askfloat("대기 시간", "기다릴 시간(초)을 입력하세요 (예: 1.5):", parent=self.root)
         if sec is not None:
-            action = {"type": "wait", "time": sec, "alias": ""}
+            action = {"type": "wait", "time": sec, "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -655,7 +734,7 @@ class EMRSequenceApp:
     def add_exec_file(self):
         file_path = filedialog.askopenfilename(title="실행할 파일 선택")
         if file_path:
-            action = {"type": "exec_file", "path": file_path, "alias": ""}
+            action = {"type": "exec_file", "path": file_path, "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -663,7 +742,7 @@ class EMRSequenceApp:
     def add_open_path(self):
         dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택")
         if dir_path:
-            action = {"type": "open_path", "path": dir_path, "alias": ""}
+            action = {"type": "open_path", "path": dir_path, "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -699,13 +778,11 @@ class EMRSequenceApp:
         act = self.processes[self.current_process][idx]
 
         if act["type"] in ["click", "type"]:
-            file_path, click_pos = self.get_image_and_click_pos(is_edit=True, current_action=act)
+            file_path, click_pos, click_type = self.get_image_and_click_pos(is_edit=True, current_action=act)
             if file_path:
                 act["image"] = file_path
                 act["click_pos"] = click_pos
-            
-            click_type = messagebox.askquestion("클릭 유형", "더블클릭 하시겠습니까?", parent=self.root)
-            act["click_type"] = "double" if click_type == 'yes' else "single"
+                act["click_type"] = click_type
 
             if act["type"] == "type":
                 new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""), parent=self.root)
@@ -747,53 +824,68 @@ class EMRSequenceApp:
     def delete_action(self):
         selected_items = self.tree.selection()
         if selected_items:
-            for item in selected_items:
-                idx = self.tree.index(item)
+            indices = sorted([self.tree.index(item) for item in selected_items], reverse=True)
+            for idx in indices:
                 del self.processes[self.current_process][idx]
             self.update_treeview()
             self.save_config()
 
     def move_up(self):
-        selected_item = self.tree.selection()
-        if not selected_item: return
+        selected_items = self.tree.selection()
+        if not selected_items: return
         
-        item = selected_item[0]
-        idx = self.tree.index(item)
-        if idx > 0:
+        indices = sorted([self.tree.index(item) for item in selected_items])
+        
+        if indices[0] == 0: return
+
+        for idx in indices:
+            item = self.tree.get_children()[idx]
             self.tree.move(item, "", idx - 1)
             actions = self.processes[self.current_process]
             actions.insert(idx - 1, actions.pop(idx))
-            self.save_config()
-            self.update_treeview() # 번호 다시 매기기
-            new_selection = self.tree.get_children()[idx-1]
-            self.tree.selection_set(new_selection)
-            self.tree.focus(new_selection)
+        
+        self.save_config()
+        self.update_treeview()
+        
+        new_selection_ids = [self.tree.get_children()[i-1] for i in indices]
+        self.tree.selection_set(new_selection_ids)
+        self.tree.focus(new_selection_ids[0])
 
 
     def move_down(self):
-        selected_item = self.tree.selection()
-        if not selected_item: return
+        selected_items = self.tree.selection()
+        if not selected_items: return
 
-        item = selected_item[0]
-        idx = self.tree.index(item)
-        if idx < len(self.processes[self.current_process]) - 1:
+        indices = sorted([self.tree.index(item) for item in selected_items], reverse=True)
+
+        if indices[0] >= len(self.processes[self.current_process]) - 1: return
+
+        for idx in indices:
+            item = self.tree.get_children()[idx]
             self.tree.move(item, "", idx + 1)
             actions = self.processes[self.current_process]
             actions.insert(idx + 1, actions.pop(idx))
-            self.save_config()
-            self.update_treeview() # 번호 다시 매기기
-            new_selection = self.tree.get_children()[idx+1]
-            self.tree.selection_set(new_selection)
-            self.tree.focus(new_selection)
+            
+        self.save_config()
+        self.update_treeview()
+
+        new_selection_ids = [self.tree.get_children()[i+1] for i in indices]
+        self.tree.selection_set(new_selection_ids)
+        self.tree.focus(new_selection_ids[0])
 
 
     def update_treeview(self):
+        selection = self.tree.selection()
+        scroll_pos = self.tree.yview()
+
         for i in self.tree.get_children():
             self.tree.delete(i)
             
         current_actions = self.processes.get(self.current_process, [])
         for i, act in enumerate(current_actions):
             alias = act.get("alias", "")
+            enabled = act.get("enabled", True)
+            enabled_display = 'O' if enabled else 'X'
             
             act_type_display = ""
             content_display = ""
@@ -820,12 +912,20 @@ class EMRSequenceApp:
                 act_type_display = "[경로 열기]"
                 content_display = alias if alias else os.path.basename(act["path"])
 
-            tags = ()
+            tags = []
+            if not enabled:
+                tags.append('disabled')
             if act.get("click_pos"):
-                tags = ('has_click_pos',)
-                self.tree.tag_configure('has_click_pos', foreground='purple')
+                tags.append('has_click_pos')
 
-            self.tree.insert("", "end", values=(i + 1, act_type_display, content_display), tags=tags)
+            self.tree.tag_configure('disabled', foreground='gray')
+            self.tree.tag_configure('has_click_pos', foreground='purple')
+
+            self.tree.insert("", "end", values=(i + 1, enabled_display, act_type_display, content_display), tags=tuple(tags))
+        
+        if selection:
+            self.tree.selection_set(selection)
+        self.tree.yview_moveto(scroll_pos[0])
 
 
     def save_config(self):
@@ -895,6 +995,8 @@ class EMRSequenceApp:
                     act["click_pos"] = None
                 if "click_type" not in act:
                     act["click_type"] = "single"
+                if "enabled" not in act:
+                    act["enabled"] = True
 
     def schedule_checker(self):
         while True:
@@ -1008,7 +1110,7 @@ class EMRSequenceApp:
             messagebox.showerror("오류", f"자동 실행 설정 중 오류가 발생했습니다.\n\n{str(e)}")
             self.sync_autostart_checkbox()
 
-    def start_rpa(self):
+    def start_rpa(self, start_index=0):
         current_actions = self.processes.get(self.current_process, [])
         if not current_actions:
             messagebox.showwarning("경고", "실행할 작업이 없습니다.")
@@ -1016,18 +1118,19 @@ class EMRSequenceApp:
 
         global_delay = self.delay_var.get()
         self.is_running = True
-        self.status_label.config(text=f"'{self.current_process}' 진행 중...", fg="red")
+        self.status_label.config(text=f"'{self.current_process}' 진행 중...", foreground="red")
         self.start_btn.config(state=tk.DISABLED)
+        self.start_from_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
         self.combo_process.config(state=tk.DISABLED)
         self.hour_spin.config(state=tk.DISABLED)
         self.minute_spin.config(state=tk.DISABLED)
 
-        threading.Thread(target=self.rpa_task, args=(current_actions, global_delay), daemon=True).start()
+        threading.Thread(target=self.rpa_task, args=(current_actions, global_delay, start_index), daemon=True).start()
 
     def stop_rpa(self):
         self.is_running = False
-        self.status_label.config(text="정지 중...", fg="orange")
+        self.status_label.config(text="정지 중...", foreground="orange")
 
     def execute_click(self, image_path, click_pos, click_type="single"):
         try:
@@ -1071,14 +1174,19 @@ class EMRSequenceApp:
             except Exception:
                 pass
 
-    def rpa_task(self, actions, global_delay):
+    def rpa_task(self, actions, global_delay, start_index=0):
         try:
-            for i, act in enumerate(actions):
+            for i in range(start_index, len(actions)):
+                act = actions[i]
+                
                 if not self.is_running: break
 
-                item_id = self.tree.get_children()[i]
-                self.tree.selection_set(item_id)
-                self.tree.see(item_id)
+                self.root.after(0, lambda item_id=self.tree.get_children()[i]: (
+                    self.tree.selection_set(item_id), self.tree.see(item_id)
+                ))
+                
+                if not act.get("enabled", True):
+                    continue
 
                 if act["type"] == "click":
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
@@ -1149,20 +1257,21 @@ class EMRSequenceApp:
                         delay_elapsed += 0.1
 
             if self.is_running:
-                self.status_label.config(text="작업 완료!", fg="green")
+                self.root.after(0, lambda: self.status_label.config(text="작업 완료!", foreground="green"))
             else:
-                self.status_label.config(text="사용자 중단", fg="orange")
+                self.root.after(0, lambda: self.status_label.config(text="사용자 중단", foreground="orange"))
 
         except Exception as e:
-            self.status_label.config(text="오류 발생!", fg="red")
-            messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}")
+            self.root.after(0, lambda: self.status_label.config(text="오류 발생!", foreground="red"))
+            self.root.after(0, lambda: messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}"))
 
         finally:
-            self.reset_ui()
+            self.root.after(0, self.reset_ui)
 
     def reset_ui(self):
         self.is_running = False
         self.start_btn.config(state=tk.NORMAL)
+        self.start_from_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
         self.combo_process.config(state="readonly")
         self.toggle_schedule_widgets()
