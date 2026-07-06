@@ -200,6 +200,106 @@ class ClickPointSelector:
         self.win.destroy()
 
 
+# --- 키보드 입력을 순차적으로 기록하기 위한 클래스 ---
+class KeyRecorder:
+    def __init__(self, parent):
+        self.parent = parent
+        self.recorded_actions = []
+        self.is_recording = False
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("키보드 입력 레코더")
+        self.win.geometry("500x450")
+        self.win.transient(parent)
+        self.win.grab_set()
+        center_window(self.win)
+
+        lbl = ttk.Label(self.win, text="[기록 시작] 버튼을 누른 후 키보드를 입력하세요.\n입력하는 키들이 하나의 작업 시퀀스로 저장됩니다.", 
+                        justify=tk.CENTER, font=("맑은 고딕", 10))
+        lbl.pack(pady=15)
+
+        self.display_text = tk.Text(self.win, height=10, width=55, state='disabled', font=("Consolas", 11))
+        self.display_text.pack(pady=10, padx=20)
+
+        btn_frame = ttk.Frame(self.win)
+        btn_frame.pack(pady=10)
+
+        self.start_btn = ttk.Button(btn_frame, text="기록 시작", command=self.toggle_recording, width=15)
+        self.start_btn.pack(side=tk.LEFT, padx=10)
+
+        self.clear_btn = ttk.Button(btn_frame, text="초기화", command=self.clear_record, width=10)
+        self.clear_btn.pack(side=tk.LEFT, padx=10)
+
+        self.save_btn = ttk.Button(self.win, text="작업 리스트에 추가 (종료)", command=self.save_and_close, style="Accent.TButton")
+        self.save_btn.pack(pady=20, ipadx=20, ipady=5)
+
+        self.win.bind("<Key>", self.on_key_event)
+        
+    def toggle_recording(self):
+        if not self.is_recording:
+            self.is_recording = True
+            self.start_btn.config(text="기록 중지 (정지)")
+            self.win.focus_set()
+        else:
+            self.is_recording = False
+            self.start_btn.config(text="기록 시작")
+            
+    def clear_record(self):
+        self.recorded_actions = []
+        self.update_display()
+        
+    def on_key_event(self, event):
+        if not self.is_recording:
+            return
+        
+        key_name = event.keysym.lower()
+        
+        # PyAutoGUI 호환 키 매핑
+        mapping = {
+            "return": "enter",
+            "escape": "esc",
+            "backspace": "backspace",
+            "tab": "tab",
+            "space": "space",
+            "up": "up",
+            "down": "down",
+            "left": "left",
+            "right": "right",
+            "prior": "pgup",
+            "next": "pgdn",
+            "end": "end",
+            "home": "home",
+            "delete": "delete",
+            "caps_lock": "capslock"
+        }
+        
+        if key_name in mapping:
+            final_key = mapping[key_name]
+        elif len(event.char) == 1:
+            final_key = event.char
+        else:
+            final_key = key_name
+            
+        # 모디파이어 키 단독 입력은 무시 (조합키는 추후 확장 가능)
+        if final_key in ['shift_l', 'shift_r', 'control_l', 'control_r', 'alt_l', 'alt_r']:
+            return "break"
+
+        self.recorded_actions.append(final_key)
+        self.update_display()
+        return "break"
+
+    def update_display(self):
+        self.display_text.config(state='normal')
+        self.display_text.delete("1.0", tk.END)
+        self.display_text.insert("1.0", " -> ".join(self.recorded_actions))
+        self.display_text.config(state='disabled')
+        self.display_text.see(tk.END)
+
+    def save_and_close(self):
+        self.is_recording = False
+        self.win.destroy()
+
+
 class EMRSequenceApp:
     def __init__(self, root):
         self.root = root
@@ -372,7 +472,7 @@ class EMRSequenceApp:
 
         ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 키 입력(엔터 등)", command=self.add_key).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file).pack(pady=3, fill=tk.X)
@@ -741,9 +841,11 @@ class EMRSequenceApp:
                 self.save_config()
 
     def add_key(self):
-        key = simpledialog.askstring("키보드 입력", "입력할 키를 적어주세요 (예: enter, tab, esc):", parent=self.root)
-        if key:
-            action = {"type": "key", "key": key.lower(), "alias": "", "enabled": True}
+        recorder = KeyRecorder(self.root)
+        self.root.wait_window(recorder.win)
+        
+        if recorder.recorded_actions:
+            action = {"type": "key", "keys": recorder.recorded_actions, "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -824,9 +926,12 @@ class EMRSequenceApp:
                 act["timeout"] = new_timeout
 
         elif act["type"] == "key":
-            new_key = simpledialog.askstring("키보드 입력 수정", "새로운 키를 입력하세요:", initialvalue=act.get("key", ""), parent=self.root)
-            if new_key:
-                act["key"] = new_key.lower()
+            current_keys = ", ".join(act.get("keys", [act.get("key", "")]))
+            new_keys_str = simpledialog.askstring("키보드 입력 수정", "새로운 키들을 콤마(,)로 구분하여 입력하세요:", 
+                                                 initialvalue=current_keys, parent=self.root)
+            if new_keys_str:
+                act["keys"] = [k.strip().lower() for k in new_keys_str.split(",")]
+                if "key" in act: del act["key"]
 
         elif act["type"] == "wait":
             new_time = simpledialog.askfloat("대기 시간 수정", "새로운 대기 시간(초)을 입력하세요:", initialvalue=act.get("time", 1.0), parent=self.root)
@@ -913,7 +1018,8 @@ class EMRSequenceApp:
                 content_display = alias if alias else f"{os.path.basename(act['image'])} -> '{act['text']}'"
             elif act["type"] == "key":
                 act_type_display = "[키보드]"
-                content_display = alias if alias else act['key']
+                keys_display = " -> ".join(act.get("keys", [act.get("key", "")] ))
+                content_display = alias if alias else keys_display
             elif act["type"] == "wait":
                 act_type_display = "[대기]"
                 content_display = alias if alias else f"{act['time']}초"
@@ -1217,7 +1323,12 @@ class EMRSequenceApp:
                     time.sleep(0.3)
 
                 elif act["type"] == "key":
-                    pyautogui.press(act["key"])
+                    keys = act.get("keys", [act.get("key", "")])
+                    for k in keys:
+                        if not self.is_running: break
+                        if k:
+                            pyautogui.press(k)
+                            time.sleep(0.01) # 입력 간 0.01초 딜레이
                     time.sleep(0.5)
 
                 elif act["type"] == "wait":
