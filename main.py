@@ -215,6 +215,7 @@ class EMRSequenceApp:
         style.configure("Treeview.Heading", font=("맑은 고딕", 10, "bold"))
         style.configure("Accent.TButton", font=("맑은 고딕", 9, "bold"))
         
+        # Treeview 비활성화 상태 색상 문제 수정을 위한 스타일 맵
         style.map('Treeview',
           foreground=self._fixed_map(style, 'foreground'),
           background=self._fixed_map(style, 'background'))
@@ -244,19 +245,18 @@ class EMRSequenceApp:
         if self.window_geometry:
             self.root.geometry(self.window_geometry)
         else:
-            self.root.geometry("650x750")
+            self.root.geometry("900x750")
             center_window(self.root)
         
         if self.window_state == 'zoomed':
             self.root.state('zoomed')
 
         self.root.resizable(True, True)
-        self.root.minsize(650, 750)
+        self.root.minsize(900, 750)
 
         # 우클릭 메뉴 생성
         self.tree_menu = tk.Menu(self.root, tearoff=0)
-        self.tree_menu.add_command(label="선택 항목 활성화", command=lambda: self.set_actions_enabled(True))
-        self.tree_menu.add_command(label="선택 항목 비활성화", command=lambda: self.set_actions_enabled(False))
+        self.tree_menu.add_command(label="동작 활성화/비활성화", command=self.toggle_action_enabled_from_menu)
 
         self.create_widgets()
         self.update_treeview()
@@ -267,6 +267,7 @@ class EMRSequenceApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def _fixed_map(self, style, option):
+        # Treeview 스타일 관련 버그 수정을 위한 헬퍼 함수
         return [elm for elm in style.map('Treeview', query_opt=option) if
                 elm[:2] != ('!disabled', '!selected')]
 
@@ -324,26 +325,20 @@ class EMRSequenceApp:
 
         self.toggle_schedule_widgets()
 
-        self.status_label = ttk.Label(self.root, text="대기 중...", font=("맑은 고딕", 11, "bold"), foreground="blue")
+        self.status_label = ttk.Label(self.root, text="예약 없음", font=("맑은 고딕", 11, "bold"), foreground="blue")
         self.status_label.pack(pady=2)
 
         middle_frame = ttk.Frame(self.root)
         middle_frame.pack(pady=5, fill=tk.BOTH, expand=True, padx=10)
-        middle_frame.rowconfigure(1, weight=1)
+        middle_frame.rowconfigure(0, weight=1)
         middle_frame.columnconfigure(0, weight=1)
 
-        action_btn_frame = ttk.Frame(middle_frame)
-        action_btn_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
-        ttk.Button(action_btn_frame, text="선택 활성화", command=lambda: self.set_actions_enabled(True)).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(action_btn_frame, text="선택 비활성화", command=lambda: self.set_actions_enabled(False)).pack(side=tk.LEFT)
 
-        tree_container = ttk.Frame(middle_frame)
-        tree_container.grid(row=1, column=0, sticky="nsew")
-        tree_container.rowconfigure(0, weight=1)
-        tree_container.columnconfigure(0, weight=1)
+        left_frame = ttk.Frame(middle_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         columns = ("#", "활성", "구분", "내용")
-        self.tree = ttk.Treeview(tree_container, columns=columns, show="headings", selectmode="extended")
+        self.tree = ttk.Treeview(left_frame, columns=columns, show="headings")
         self.tree.heading("#", text="번호", anchor="center")
         self.tree.heading("활성", text="활성", anchor="center")
         self.tree.heading("구분", text="구분", anchor="center")
@@ -354,24 +349,26 @@ class EMRSequenceApp:
         self.tree.column("구분", width=120, anchor="center", stretch=False)
         self.tree.column("내용", width=300, stretch=True)
         
-        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        scrollbar.pack(side=tk.LEFT, fill="y")
         
+        # 이벤트 바인딩
+        self.tree.bind("<Button-1>", self.on_tree_click)
         if sys.platform == "darwin":
             self.tree.bind("<Button-2>", self.show_tree_menu)
         else:
             self.tree.bind("<Button-3>", self.show_tree_menu)
 
         order_frame = ttk.Frame(middle_frame)
-        order_frame.grid(row=1, column=1, sticky="ns", padx=5)
+        order_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         ttk.Button(order_frame, text="▲ 위로", command=self.move_up).pack(pady=2, fill=tk.X)
         ttk.Button(order_frame, text="▼ 아래로", command=self.move_down).pack(pady=2, fill=tk.X)
 
         right_frame = ttk.Frame(middle_frame)
-        right_frame.grid(row=1, column=2, sticky="ns", padx=5)
+        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
 
         ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type).pack(pady=3, fill=tk.X)
@@ -413,27 +410,55 @@ class EMRSequenceApp:
                                   command=self.stop_rpa)
         self.stop_btn.grid(row=0, column=2, padx=5)
 
+    def on_tree_click(self, event):
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+
+        column_id = self.tree.identify_column(event.x)
+        item_id = self.tree.identify_row(event.y)
+
+        if not item_id:
+            return
+
+        # '활성' 컬럼(#2)이 클릭되었는지 확인
+        if column_id == '#2':
+            self.toggle_action_enabled(item_id)
+
     def show_tree_menu(self, event):
         item = self.tree.identify_row(event.y)
         if item:
-            if item not in self.tree.selection():
-                self.tree.selection_set(item)
-                self.tree.focus(item)
+            self.tree.selection_set(item)
+            self.tree.focus(item)
             self.tree_menu.post(event.x_root, event.y_root)
 
-    def set_actions_enabled(self, enabled):
-        selected_items = self.tree.selection()
-        if not selected_items:
-            messagebox.showwarning("선택 오류", "상태를 변경할 작업을 하나 이상 선택해주세요.")
+    def toggle_action_enabled_from_menu(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
             return
+        self.toggle_action_enabled(selected_item[0])
 
-        for item_id in selected_items:
-            idx = self.tree.index(item_id)
-            act = self.processes[self.current_process][idx]
-            act["enabled"] = enabled
-        
+    def toggle_action_enabled(self, item_id):
+        idx = self.tree.index(item_id)
+        act = self.processes[self.current_process][idx]
+        act["enabled"] = not act.get("enabled", True)
         self.save_config()
-        self.update_treeview()
+
+        # 전체를 다시 그리지 않고 해당 항목만 업데이트
+        enabled_display = '☑' if act["enabled"] else '☐'
+        self.tree.set(item_id, column="활성", value=enabled_display)
+
+        current_tags = list(self.tree.item(item_id, 'tags'))
+        if 'disabled' in current_tags:
+            current_tags.remove('disabled')
+        
+        if not act["enabled"]:
+            current_tags.append('disabled')
+        
+        self.tree.item(item_id, tags=tuple(current_tags))
+        
+        self.tree.selection_set(item_id)
+        self.tree.focus(item_id)
 
     def start_from_selected(self):
         selected_item = self.tree.selection()
@@ -508,7 +533,7 @@ class EMRSequenceApp:
                     self.minute_var.set(f"{int(minute):02d}")
                     self.status_label.config(text=f"'{self.current_process}' 예약됨 (매일 {schedule_value})", foreground="green")
                 except (ValueError, TypeError):
-                    self.status_label.config(text="대기 중...", foreground="blue")
+                    self.status_label.config(text="예약 없음", foreground="blue")
             elif schedule_type == "boot":
                 try:
                     minute, second = schedule_value.split(":")
@@ -516,10 +541,10 @@ class EMRSequenceApp:
                     self.boot_second_var.set(f"{int(second):02d}")
                     self.status_label.config(text=f"'{self.current_process}' 예약됨 (부팅 후 {schedule_value})", foreground="purple")
                 except (ValueError, TypeError):
-                     self.status_label.config(text="대기 중...", foreground="blue")
+                     self.status_label.config(text="예약 없음", foreground="blue")
         else:
             self.schedule_type_var.set("time")
-            self.status_label.config(text="대기 중...", foreground="blue")
+            self.status_label.config(text="예약 없음", foreground="blue")
         
         self.toggle_schedule_widgets()
 
@@ -824,6 +849,7 @@ class EMRSequenceApp:
     def delete_action(self):
         selected_items = self.tree.selection()
         if selected_items:
+            # 여러 항목 삭제 시 인덱스가 변경되므로 뒤에서부터 삭제
             indices = sorted([self.tree.index(item) for item in selected_items], reverse=True)
             for idx in indices:
                 del self.processes[self.current_process][idx]
@@ -831,50 +857,39 @@ class EMRSequenceApp:
             self.save_config()
 
     def move_up(self):
-        selected_items = self.tree.selection()
-        if not selected_items: return
+        selected_item = self.tree.selection()
+        if not selected_item: return
         
-        indices = sorted([self.tree.index(item) for item in selected_items])
-        
-        if indices[0] == 0: return
-
-        for idx in indices:
-            item = self.tree.get_children()[idx]
-            self.tree.move(item, "", idx - 1)
+        item = selected_item[0]
+        idx = self.tree.index(item)
+        if idx > 0:
             actions = self.processes[self.current_process]
             actions.insert(idx - 1, actions.pop(idx))
-        
-        self.save_config()
-        self.update_treeview()
-        
-        new_selection_ids = [self.tree.get_children()[i-1] for i in indices]
-        self.tree.selection_set(new_selection_ids)
-        self.tree.focus(new_selection_ids[0])
+            self.save_config()
+            self.update_treeview() 
+            new_selection_id = self.tree.get_children()[idx-1]
+            self.tree.selection_set(new_selection_id)
+            self.tree.focus(new_selection_id)
 
 
     def move_down(self):
-        selected_items = self.tree.selection()
-        if not selected_items: return
+        selected_item = self.tree.selection()
+        if not selected_item: return
 
-        indices = sorted([self.tree.index(item) for item in selected_items], reverse=True)
-
-        if indices[0] >= len(self.processes[self.current_process]) - 1: return
-
-        for idx in indices:
-            item = self.tree.get_children()[idx]
-            self.tree.move(item, "", idx + 1)
+        item = selected_item[0]
+        idx = self.tree.index(item)
+        if idx < len(self.processes[self.current_process]) - 1:
             actions = self.processes[self.current_process]
             actions.insert(idx + 1, actions.pop(idx))
-            
-        self.save_config()
-        self.update_treeview()
-
-        new_selection_ids = [self.tree.get_children()[i+1] for i in indices]
-        self.tree.selection_set(new_selection_ids)
-        self.tree.focus(new_selection_ids[0])
+            self.save_config()
+            self.update_treeview()
+            new_selection_id = self.tree.get_children()[idx+1]
+            self.tree.selection_set(new_selection_id)
+            self.tree.focus(new_selection_id)
 
 
     def update_treeview(self):
+        # 현재 선택 및 스크롤 위치 저장
         selection = self.tree.selection()
         scroll_pos = self.tree.yview()
 
@@ -885,7 +900,7 @@ class EMRSequenceApp:
         for i, act in enumerate(current_actions):
             alias = act.get("alias", "")
             enabled = act.get("enabled", True)
-            enabled_display = 'O' if enabled else 'X'
+            enabled_display = '☑' if enabled else '☐'
             
             act_type_display = ""
             content_display = ""
@@ -923,8 +938,10 @@ class EMRSequenceApp:
 
             self.tree.insert("", "end", values=(i + 1, enabled_display, act_type_display, content_display), tags=tuple(tags))
         
+        # 선택 및 스크롤 위치 복원
         if selection:
             self.tree.selection_set(selection)
+            self.tree.focus(selection[0])
         self.tree.yview_moveto(scroll_pos[0])
 
 
