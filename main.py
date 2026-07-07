@@ -7,7 +7,7 @@ import os
 import sys
 import pyautogui
 import pyperclip
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 
 # --- 유틸리티 함수 ---
@@ -34,6 +34,13 @@ try:
 except ImportError:
     messagebox.showerror("라이브러리 누락", "pystray 라이브러리가 필요합니다.\n명령어: pip install pystray")
     sys.exit()
+
+# tkcalendar 라이브러리 (날짜 선택기용)
+try:
+    from tkcalendar import Calendar
+    TKCALENDAR_AVAILABLE = True
+except ImportError:
+    TKCALENDAR_AVAILABLE = False
 
 # 부팅 시 자동 실행을 위한 winreg
 try:
@@ -300,6 +307,111 @@ class KeyRecorder:
         self.win.destroy()
 
 
+# --- 날짜 입력 설정을 위한 클래스 ---
+class DateSettingDialog:
+    def __init__(self, parent, initial_offset=0, initial_format="%Y%m%d"):
+        self.parent = parent
+        self.result = None
+        
+        self.win = tk.Toplevel(parent)
+        self.win.title("날짜 입력 설정")
+        self.win.geometry("400x520")
+        self.win.transient(parent)
+        self.win.grab_set()
+        center_window(self.win)
+        
+        today = datetime.now().date()
+        target_date = today + timedelta(days=initial_offset)
+        
+        main_frame = ttk.Frame(self.win, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="1. 날짜 선택 (달력)", font=("맑은 고딕", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        if TKCALENDAR_AVAILABLE:
+            self.cal = Calendar(main_frame, selectmode='day', 
+                                year=target_date.year, month=target_date.month, day=target_date.day,
+                                date_pattern='yyyy-mm-dd')
+            self.cal.pack(fill="x", pady=5)
+            # 초기 선택 설정
+            self.cal.selection_set(target_date)
+            self.cal.bind("<<CalendarSelected>>", self.on_date_selected)
+        else:
+            err_lbl = ttk.Label(main_frame, text="tkcalendar 라이브러리가 설치되어 있지 않습니다.\n달력 기능을 사용하려면 아래 명령어를 실행하세요:\npip install tkcalendar", 
+                                foreground="red", justify=tk.CENTER)
+            err_lbl.pack(pady=20)
+            self.cal = None
+
+        ttk.Label(main_frame, text="2. 기준일(오늘)로부터 차이 (일)", font=("맑은 고딕", 10, "bold")).pack(anchor="w", pady=(15, 5))
+        
+        offset_frame = ttk.Frame(main_frame)
+        offset_frame.pack(fill="x")
+        
+        self.offset_var = tk.IntVar(value=initial_offset)
+        self.offset_spin = tk.Spinbox(offset_frame, from_=-3650, to=3650, textvariable=self.offset_var, width=10)
+        self.offset_spin.pack(side=tk.LEFT, padx=5)
+        
+        # trace를 사용하여 값이 변경될 때마다 달력과 라벨 업데이트
+        self.offset_var.trace_add("write", lambda *args: self.update_from_offset())
+        
+        self.calc_label = ttk.Label(offset_frame, text=f"(계산된 날짜: {target_date.strftime('%Y-%m-%d')})", foreground="blue")
+        self.calc_label.pack(side=tk.LEFT, padx=10)
+        
+        ttk.Label(main_frame, text="3. 날짜 출력 형식", font=("맑은 고딕", 10, "bold")).pack(anchor="w", pady=(15, 5))
+        
+        self.format_var = tk.StringVar(value=initial_format)
+        formats = ["%Y%m%d", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y년 %m월 %d일"]
+        self.format_combo = ttk.Combobox(main_frame, values=formats, textvariable=self.format_var)
+        self.format_combo.pack(fill="x", pady=5)
+        
+        ttk.Label(main_frame, text="예: %Y%m%d -> 20231027", font=("맑은 고딕", 8), foreground="gray").pack(anchor="w")
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=(30, 0))
+        
+        ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton", width=15).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="취소", command=self.win.destroy, width=15).pack(side=tk.LEFT, padx=10)
+
+    def on_date_selected(self, event=None):
+        if not self.cal: return
+        try:
+            selected_date = self.cal.selection_get()
+            today = datetime.now().date()
+            diff = (selected_date - today).days
+            
+            # 무한 루프 방지를 위해 값 확인 후 업데이트
+            if self.offset_var.get() != diff:
+                self.offset_var.set(diff)
+            
+            self.calc_label.config(text=f"(계산된 날짜: {selected_date.strftime('%Y-%m-%d')})")
+        except:
+            pass
+
+    def update_from_offset(self):
+        try:
+            val = self.offset_var.get()
+            target_date = datetime.now().date() + timedelta(days=val)
+            self.calc_label.config(text=f"(계산된 날짜: {target_date.strftime('%Y-%m-%d')})")
+            
+            if self.cal:
+                # 현재 달력 선택과 다를 때만 업데이트
+                current_cal_date = self.cal.selection_get()
+                if current_cal_date != target_date:
+                    self.cal.selection_set(target_date)
+        except (tk.TclError, ValueError):
+            # 입력 중인 상태일 수 있음
+            pass
+
+    def on_ok(self):
+        try:
+            offset = self.offset_var.get()
+            fmt = self.format_var.get()
+            self.result = (offset, fmt)
+            self.win.destroy()
+        except:
+            messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
+
+
 class EMRSequenceApp:
     def __init__(self, root):
         self.root = root
@@ -314,6 +426,9 @@ class EMRSequenceApp:
         style.configure("TCombobox", font=("맑은 고딕", 9))
         style.configure("Treeview.Heading", font=("맑은 고딕", 10, "bold"))
         style.configure("Accent.TButton", font=("맑은 고딕", 9, "bold"))
+        
+        # 왼쪽 정렬 버튼 스타일 (패딩 추가하여 들여쓰기 구현)
+        style.configure("Left.TButton", font=("맑은 고딕", 9), anchor="w", padding=(10, 0, 0, 0))
         
         # Treeview 비활성화 상태 색상 문제 수정을 위한 스타일 맵
         style.map('Treeview',
@@ -464,25 +579,29 @@ class EMRSequenceApp:
 
         order_frame = ttk.Frame(middle_frame)
         order_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        ttk.Button(order_frame, text="▲ 위로", command=self.move_up).pack(pady=2, fill=tk.X)
-        ttk.Button(order_frame, text="▼ 아래로", command=self.move_down).pack(pady=2, fill=tk.X)
+        ttk.Button(order_frame, text="▲", command=self.move_up, width=3).pack(pady=2, fill=tk.X)
+        ttk.Button(order_frame, text="▼", command=self.move_down, width=3).pack(pady=2, fill=tk.X)
 
         right_frame = ttk.Frame(middle_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
 
-        ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path).pack(pady=3, fill=tk.X)
+        # 버튼 가로 사이즈 조정 (기존 25에서 22로)
+        btn_width = 22
 
-        ttk.Button(right_frame, text="선택한 작업 이름 변경", command=self.rename_action).pack(
+        ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 날짜 입력", command=self.add_date_input, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+
+        ttk.Button(right_frame, text="선택한 작업 이름 변경", command=self.rename_action, style="Left.TButton", width=btn_width).pack(
             pady=(15, 3), fill=tk.X)
 
-        ttk.Button(right_frame, text="선택한 작업(내용) 수정", command=self.edit_action).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="선택한 작업 삭제", command=self.delete_action).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="선택한 작업(내용) 수정", command=self.edit_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="선택한 작업 삭제", command=self.delete_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
 
         bottom_frame = ttk.Frame(self.root)
         bottom_frame.pack(pady=10, fill=tk.X, padx=10)
@@ -850,6 +969,16 @@ class EMRSequenceApp:
             self.update_treeview()
             self.save_config()
 
+    def add_date_input(self):
+        dialog = DateSettingDialog(self.root)
+        self.root.wait_window(dialog.win)
+        if dialog.result:
+            offset, fmt = dialog.result
+            action = {"type": "date_input", "offset": offset, "format": fmt, "alias": "", "enabled": True}
+            self.processes[self.current_process].append(action)
+            self.update_treeview()
+            self.save_config()
+
     def add_wait(self):
         sec = simpledialog.askfloat("대기 시간", "기다릴 시간(초)을 입력하세요 (예: 1.5):", parent=self.root)
         if sec is not None:
@@ -932,6 +1061,14 @@ class EMRSequenceApp:
             if new_keys_str:
                 act["keys"] = [k.strip().lower() for k in new_keys_str.split(",")]
                 if "key" in act: del act["key"]
+
+        elif act["type"] == "date_input":
+            dialog = DateSettingDialog(self.root, initial_offset=act.get("offset", 0), initial_format=act.get("format", "%Y%m%d"))
+            self.root.wait_window(dialog.win)
+            if dialog.result:
+                offset, fmt = dialog.result
+                act["offset"] = offset
+                act["format"] = fmt
 
         elif act["type"] == "wait":
             new_time = simpledialog.askfloat("대기 시간 수정", "새로운 대기 시간(초)을 입력하세요:", initialvalue=act.get("time", 1.0), parent=self.root)
@@ -1020,6 +1157,9 @@ class EMRSequenceApp:
                 act_type_display = "[키보드]"
                 keys_display = " -> ".join(act.get("keys", [act.get("key", "")] ))
                 content_display = alias if alias else keys_display
+            elif act["type"] == "date_input":
+                act_type_display = "[날짜 입력]"
+                content_display = alias if alias else f"오늘로부터 {act['offset']}일 ({act['format']})"
             elif act["type"] == "wait":
                 act_type_display = "[대기]"
                 content_display = alias if alias else f"{act['time']}초"
@@ -1329,6 +1469,12 @@ class EMRSequenceApp:
                         if k:
                             pyautogui.press(k)
                             time.sleep(0.01) # 입력 간 0.01초 딜레이
+                    time.sleep(0.5)
+
+                elif act["type"] == "date_input":
+                    target_date = datetime.now() + timedelta(days=act.get("offset", 0))
+                    date_str = target_date.strftime(act.get("format", "%Y-%m-%d"))
+                    self.type_text_char_by_char(date_str)
                     time.sleep(0.5)
 
                 elif act["type"] == "wait":
