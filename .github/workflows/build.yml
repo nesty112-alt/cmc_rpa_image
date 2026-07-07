@@ -19,7 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: 패키지 설치
-        run: pip install pyinstaller pyautogui pyperclip pillow pystray opencv-python pywin32
+        run: pip install pyinstaller pyautogui pyperclip pillow pystray opencv-python pywin32 tkcalendar
 
       - name: exe 빌드
         run: pyinstaller --onefile --windowed main.py
