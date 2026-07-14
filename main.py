@@ -78,11 +78,34 @@ class SnippingTool:
         self.result_img = None
         self.snip_window = tk.Toplevel(root)
 
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        self.snip_window.geometry(f"{screen_width}x{screen_height}+0+0")
-        self.snip_window.overrideredirect(True)
+        self.is_multi_monitor = False
+        self.v_left, self.v_top = 0, 0
 
+        # For multi-monitor support on Windows
+        if GET_TICK_COUNT_AVAILABLE: # This implies ctypes is available
+            try:
+                SM_XVIRTUALSCREEN = 76
+                SM_YVIRTUALSCREEN = 77
+                SM_CXVIRTUALSCREEN = 78
+                SM_CYVIRTUALSCREEN = 79
+                
+                self.v_left = ctypes.windll.user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+                self.v_top = ctypes.windll.user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+                v_width = ctypes.windll.user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+                v_height = ctypes.windll.user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+                
+                self.snip_window.geometry(f"{v_width}x{v_height}+{self.v_left}+{self.v_top}")
+                self.is_multi_monitor = True
+            except Exception:
+                self.is_multi_monitor = False
+        
+        if not self.is_multi_monitor:
+            # Fallback for non-Windows or if ctypes fails
+            screen_width = root.winfo_screenwidth()
+            screen_height = root.winfo_screenheight()
+            self.snip_window.geometry(f"{screen_width}x{screen_height}+0+0")
+
+        self.snip_window.overrideredirect(True)
         self.snip_window.attributes('-alpha', 0.3)
         self.snip_window.config(bg="black", cursor="cross")
         self.snip_window.attributes("-topmost", True)
@@ -124,7 +147,21 @@ class SnippingTool:
             self.snip_window.destroy()
 
     def capture_screen(self, x1, y1, x2, y2):
-        self.result_img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        try:
+            if self.is_multi_monitor:
+                # Adjust coordinates for the virtual screen
+                abs_x1 = self.v_left + x1
+                abs_y1 = self.v_top + y1
+                abs_x2 = self.v_left + x2
+                abs_y2 = self.v_top + y2
+                self.result_img = ImageGrab.grab(bbox=(abs_x1, abs_y1, abs_x2, abs_y2), all_screens=True)
+            else:
+                # Original behavior
+                self.result_img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        except Exception as e:
+            messagebox.showerror("캡쳐 오류", f"화면을 캡쳐하는 중 오류가 발생했습니다:\n{e}")
+            self.result_img = None
+
         self.snip_window.destroy()
 
     def cancel(self):
