@@ -10,6 +10,7 @@ import pyperclip
 import base64
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
+import copy
 
 # --- 유틸리티 함수 ---
 def center_window(win):
@@ -412,6 +413,73 @@ class DateSettingDialog:
         except:
             messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
 
+class FailureActionDialog:
+    def __init__(self, parent, action_list, current_action):
+        self.parent = parent
+        self.result = None
+        self.action_list = action_list
+        
+        self.win = tk.Toplevel(parent)
+        self.win.title("실패 시 동작 설정")
+        self.win.geometry("400x300")
+        self.win.transient(parent)
+        self.win.grab_set()
+        center_window(self.win)
+
+        main_frame = ttk.Frame(self.win, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        on_failure = current_action.get("on_failure", {})
+        
+        self.enabled_var = tk.BooleanVar(value=on_failure.get("enabled", False))
+        self.retries_var = tk.IntVar(value=on_failure.get("retries", 3))
+        self.goto_var = tk.StringVar(value=on_failure.get("goto", ""))
+
+        ttk.Checkbutton(main_frame, text="실패 시 재시도/이동 사용", variable=self.enabled_var).pack(anchor="w", pady=(0, 10))
+
+        retries_frame = ttk.Frame(main_frame)
+        retries_frame.pack(fill="x", pady=5)
+        ttk.Label(retries_frame, text="재시도 횟수:").pack(side=tk.LEFT, padx=(0, 10))
+        tk.Spinbox(retries_frame, from_=0, to=100, textvariable=self.retries_var, width=5).pack(side=tk.LEFT)
+
+        goto_frame = ttk.Frame(main_frame)
+        goto_frame.pack(fill="x", pady=5)
+        ttk.Label(goto_frame, text="이동할 단계:").pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 단계 목록 생성
+        step_options = [f"{i+1}: {act.get('alias') or act['type']}" for i, act in enumerate(action_list)]
+        self.goto_combo = ttk.Combobox(goto_frame, textvariable=self.goto_var, values=step_options, width=30)
+        if on_failure.get("goto"):
+            self.goto_combo.set(f"{on_failure['goto']}: {action_list[on_failure['goto']-1].get('alias') or action_list[on_failure['goto']-1]['type']}")
+        self.goto_combo.pack(side=tk.LEFT)
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=(30, 0))
+        
+        ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton").pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="설정 초기화", command=self.on_clear).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="취소", command=self.win.destroy).pack(side=tk.LEFT, padx=10)
+
+    def on_ok(self):
+        goto_val = self.goto_var.get()
+        goto_step = None
+        if goto_val:
+            try:
+                goto_step = int(goto_val.split(":")[0])
+            except (ValueError, IndexError):
+                messagebox.showerror("오류", "이동할 단계 형식이 올바르지 않습니다.", parent=self.win)
+                return
+
+        self.result = {
+            "enabled": self.enabled_var.get(),
+            "retries": self.retries_var.get(),
+            "goto": goto_step
+        }
+        self.win.destroy()
+
+    def on_clear(self):
+        self.result = {}
+        self.win.destroy()
 
 class EMRSequenceApp:
     def __init__(self, root):
@@ -449,12 +517,16 @@ class EMRSequenceApp:
         self.confidence_var = tk.DoubleVar(value=0.8)
 
         self.last_run_date = {}
+        self.retry_counts = {}
         
         self.schedule_type_var = tk.StringVar(value="time")
         self.hour_var = tk.StringVar(value="09")
         self.minute_var = tk.StringVar(value="00")
         self.boot_minute_var = tk.StringVar(value="05")
         self.boot_second_var = tk.StringVar(value="00")
+
+        self.undo_stack = []
+        self.redo_stack = []
 
         self.load_config()
         
@@ -478,6 +550,7 @@ class EMRSequenceApp:
         self.update_treeview()
         self.update_schedule_ui()
         self.sync_autostart_checkbox()
+        self.update_undo_redo_buttons()
 
         threading.Thread(target=self.schedule_checker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -504,7 +577,9 @@ class EMRSequenceApp:
         ttk.Button(top_frame, text="새로 만들기", command=self.add_process).grid(row=0, column=3, padx=2, pady=2)
         ttk.Button(top_frame, text="이름 변경", command=self.rename_process).grid(row=0, column=4, padx=2, pady=2)
         ttk.Button(top_frame, text="삭제", command=self.delete_process).grid(row=0, column=5, padx=2, pady=2)
+        
         ttk.Button(top_frame, text="환경설정", command=self.open_settings_window).grid(row=0, column=6, padx=(10, 2), pady=2, sticky="e")
+
 
         schedule_frame = ttk.LabelFrame(self.root, text="프로세스 실행 예약", padding=(10, 5))
         schedule_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -553,17 +628,21 @@ class EMRSequenceApp:
         left_frame = ttk.Frame(middle_frame)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        columns = ("#", "활성", "구분", "내용")
-        self.tree = ttk.Treeview(left_frame, columns=columns, show="headings")
+        columns = ("#", "활성", "구분", "내용", "실패 시 이동", "재시도")
+        self.tree = ttk.Treeview(left_frame, columns=columns, show="headings", selectmode="extended")
         self.tree.heading("#", text="번호", anchor="center")
         self.tree.heading("활성", text="활성", anchor="center")
         self.tree.heading("구분", text="구분", anchor="center")
         self.tree.heading("내용", text="내용")
+        self.tree.heading("실패 시 이동", text="실패 시 이동", anchor="center")
+        self.tree.heading("재시도", text="재시도", anchor="center")
         
         self.tree.column("#", width=40, anchor="center", stretch=False)
         self.tree.column("활성", width=50, anchor="center", stretch=False)
         self.tree.column("구분", width=120, anchor="center", stretch=False)
         self.tree.column("내용", width=300, stretch=True)
+        self.tree.column("실패 시 이동", width=100, anchor="center", stretch=False)
+        self.tree.column("재시도", width=60, anchor="center", stretch=False)
         
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -599,11 +678,15 @@ class EMRSequenceApp:
         ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
 
-        ttk.Button(right_frame, text="선택한 작업 이름 변경", command=self.rename_action, style="Left.TButton", width=btn_width).pack(
-            pady=(15, 3), fill=tk.X)
+        ttk.Button(right_frame, text="실패 시 동작 설정", command=self.set_failure_action, style="Left.TButton", width=btn_width).pack(pady=(15, 3), fill=tk.X)
+        ttk.Button(right_frame, text="작업 이름 변경", command=self.rename_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="작업(내용) 수정", command=self.edit_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="작업 삭제", command=self.delete_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
 
-        ttk.Button(right_frame, text="선택한 작업(내용) 수정", command=self.edit_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="선택한 작업 삭제", command=self.delete_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        self.undo_btn = ttk.Button(right_frame, text="↶ Undo", command=self.undo_action, style="Left.TButton", width=btn_width)
+        self.undo_btn.pack(pady=(10,3), fill=tk.X)
+        self.redo_btn = ttk.Button(right_frame, text="↷ Redo", command=self.redo_action, style="Left.TButton", width=btn_width)
+        self.redo_btn.pack(pady=3, fill=tk.X)
 
         bottom_frame = ttk.Frame(self.root)
         bottom_frame.pack(pady=10, fill=tk.X, padx=10)
@@ -630,6 +713,31 @@ class EMRSequenceApp:
         self.stop_btn = ttk.Button(ctrl_frame, text="■ 정지", state=tk.DISABLED,
                                   command=self.stop_rpa)
         self.stop_btn.grid(row=0, column=2, padx=5)
+
+    def save_state_for_undo(self):
+        self.undo_stack.append(copy.deepcopy(self.processes))
+        self.redo_stack.clear()
+        self.update_undo_redo_buttons()
+
+    def undo_action(self):
+        if self.undo_stack:
+            self.redo_stack.append(copy.deepcopy(self.processes))
+            self.processes = self.undo_stack.pop()
+            self.update_treeview()
+            self.update_undo_redo_buttons()
+            self.save_config()
+
+    def redo_action(self):
+        if self.redo_stack:
+            self.undo_stack.append(copy.deepcopy(self.processes))
+            self.processes = self.redo_stack.pop()
+            self.update_treeview()
+            self.update_undo_redo_buttons()
+            self.save_config()
+
+    def update_undo_redo_buttons(self):
+        self.undo_btn.config(state=tk.NORMAL if self.undo_stack else tk.DISABLED)
+        self.redo_btn.config(state=tk.NORMAL if self.redo_stack else tk.DISABLED)
 
     def on_tree_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
@@ -660,6 +768,7 @@ class EMRSequenceApp:
         self.toggle_action_enabled(selected_item[0])
 
     def toggle_action_enabled(self, item_id):
+        self.save_state_for_undo()
         idx = self.tree.index(item_id)
         act = self.processes[self.current_process][idx]
         act["enabled"] = not act.get("enabled", True)
@@ -933,6 +1042,7 @@ class EMRSequenceApp:
         return None
 
     def add_click(self):
+        self.save_state_for_undo()
         file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
             action = {"type": "click", "image": file_path, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
@@ -941,6 +1051,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def add_type(self):
+        self.save_state_for_undo()
         file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
             text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:", parent=self.root)
@@ -951,6 +1062,7 @@ class EMRSequenceApp:
                 self.save_config()
 
     def add_password(self):
+        self.save_state_for_undo()
         file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
             password = simpledialog.askstring("비밀번호 입력", "입력할 비밀번호를 적어주세요:", show='*', parent=self.root)
@@ -961,6 +1073,7 @@ class EMRSequenceApp:
                 self.save_config()
 
     def add_wait_image(self):
+        self.save_state_for_undo()
         file_path = self.get_image_path_for_wait()
         if file_path:
             timeout = simpledialog.askfloat("타임아웃 설정", "이미지가 나타날 때까지 기다릴 최대 시간(초)을 입력하세요\n(예: 10초 이내에 안 나타나면 오류 처리):",
@@ -972,6 +1085,7 @@ class EMRSequenceApp:
                 self.save_config()
 
     def add_key(self):
+        self.save_state_for_undo()
         recorder = KeyRecorder(self.root)
         self.root.wait_window(recorder.win)
         
@@ -982,6 +1096,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def add_date_input(self):
+        self.save_state_for_undo()
         dialog = DateSettingDialog(self.root)
         self.root.wait_window(dialog.win)
         if dialog.result:
@@ -992,6 +1107,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def add_wait(self):
+        self.save_state_for_undo()
         sec = simpledialog.askfloat("대기 시간", "기다릴 시간(초)을 입력하세요 (예: 1.5):", parent=self.root)
         if sec is not None:
             action = {"type": "wait", "time": sec, "alias": "", "enabled": True}
@@ -1000,6 +1116,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def add_exec_file(self):
+        self.save_state_for_undo()
         file_path = filedialog.askopenfilename(title="실행할 파일 선택")
         if file_path:
             action = {"type": "exec_file", "path": file_path, "alias": "", "enabled": True}
@@ -1008,6 +1125,7 @@ class EMRSequenceApp:
             self.save_config()
     
     def add_open_path(self):
+        self.save_state_for_undo()
         dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택")
         if dir_path:
             action = {"type": "open_path", "path": dir_path, "alias": "", "enabled": True}
@@ -1016,6 +1134,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def rename_action(self):
+        self.save_state_for_undo()
         selected_item = self.tree.selection()
         if not selected_item:
             messagebox.showwarning("선택 오류", "이름을 변경할 작업을 선택해주세요.")
@@ -1037,6 +1156,7 @@ class EMRSequenceApp:
             self.save_config()
 
     def edit_action(self):
+        self.save_state_for_undo()
         selected_item = self.tree.selection()
         if not selected_item:
             messagebox.showwarning("선택 오류", "수정할 작업을 선택해주세요.")
@@ -1104,7 +1224,31 @@ class EMRSequenceApp:
         self.update_treeview()
         self.save_config()
 
+    def set_failure_action(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showwarning("선택 오류", "설정할 작업을 선택해주세요.")
+            return
+
+        idx = self.tree.index(selected_item[0])
+        current_actions = self.processes[self.current_process]
+        act = current_actions[idx]
+
+        dialog = FailureActionDialog(self.root, current_actions, act)
+        self.root.wait_window(dialog.win)
+
+        if dialog.result is not None:
+            self.save_state_for_undo()
+            if not dialog.result:
+                if "on_failure" in act:
+                    del act["on_failure"]
+            else:
+                act["on_failure"] = dialog.result
+            self.update_treeview()
+            self.save_config()
+
     def delete_action(self):
+        self.save_state_for_undo()
         selected_items = self.tree.selection()
         if selected_items:
             # 여러 항목 삭제 시 인덱스가 변경되므로 뒤에서부터 삭제
@@ -1115,35 +1259,71 @@ class EMRSequenceApp:
             self.save_config()
 
     def move_up(self):
-        selected_item = self.tree.selection()
-        if not selected_item: return
+        self.save_state_for_undo()
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+
+        selected_indices = sorted([self.tree.index(item) for item in selected_items])
+
+        if selected_indices[0] == 0:
+            return
+
+        actions = self.processes[self.current_process]
         
-        item = selected_item[0]
-        idx = self.tree.index(item)
-        if idx > 0:
-            actions = self.processes[self.current_process]
-            actions.insert(idx - 1, actions.pop(idx))
-            self.save_config()
-            self.update_treeview() 
-            new_selection_id = self.tree.get_children()[idx-1]
-            self.tree.selection_set(new_selection_id)
-            self.tree.focus(new_selection_id)
+        for idx in selected_indices:
+            item_to_move = actions.pop(idx)
+            actions.insert(idx - 1, item_to_move)
+            
+            # UI 상에서 아이템 이동
+            item_id = self.tree.get_children()[idx]
+            self.tree.move(item_id, '', idx - 1)
+
+        self.save_config()
+        self.renumber_treeview()
+
+        # 선택 상태 복원
+        new_selection_ids = [self.tree.get_children()[i-1] for i in selected_indices]
+        self.tree.selection_set(new_selection_ids)
+        if new_selection_ids:
+            self.tree.focus(new_selection_ids[0])
+            self.tree.see(new_selection_ids[0])
 
 
     def move_down(self):
-        selected_item = self.tree.selection()
-        if not selected_item: return
+        self.save_state_for_undo()
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
 
-        item = selected_item[0]
-        idx = self.tree.index(item)
-        if idx < len(self.processes[self.current_process]) - 1:
-            actions = self.processes[self.current_process]
+        selected_indices = sorted([self.tree.index(item) for item in selected_items], reverse=True)
+        
+        if selected_indices[0] >= len(self.processes[self.current_process]) - 1:
+            return
+
+        actions = self.processes[self.current_process]
+
+        for idx in selected_indices:
+            item_to_move = actions.pop(idx)
             actions.insert(idx + 1, actions.pop(idx))
-            self.save_config()
-            self.update_treeview()
-            new_selection_id = self.tree.get_children()[idx+1]
-            self.tree.selection_set(new_selection_id)
-            self.tree.focus(new_selection_id)
+
+            # UI 상에서 아이템 이동
+            item_id = self.tree.get_children()[idx]
+            self.tree.move(item_id, '', idx + 1)
+
+        self.save_config()
+        self.renumber_treeview()
+
+        # 선택 상태 복원
+        new_selection_ids = [self.tree.get_children()[i+1] for i in selected_indices]
+        self.tree.selection_set(new_selection_ids)
+        if new_selection_ids:
+            self.tree.focus(new_selection_ids[-1])
+            self.tree.see(new_selection_ids[-1])
+
+    def renumber_treeview(self):
+        for i, item_id in enumerate(self.tree.get_children()):
+            self.tree.set(item_id, column="#", value=i + 1)
 
 
     def update_treeview(self):
@@ -1192,6 +1372,13 @@ class EMRSequenceApp:
                 act_type_display = "[경로 열기]"
                 content_display = alias if alias else os.path.basename(act["path"])
 
+            on_failure = act.get("on_failure")
+            goto_val = ""
+            retries_val = ""
+            if on_failure and on_failure.get("enabled"):
+                goto_val = on_failure.get('goto', '')
+                retries_val = on_failure.get('retries', '')
+
             tags = []
             if not enabled:
                 tags.append('disabled')
@@ -1201,12 +1388,17 @@ class EMRSequenceApp:
             self.tree.tag_configure('disabled', foreground='gray')
             self.tree.tag_configure('has_click_pos', foreground='purple')
 
-            self.tree.insert("", "end", values=(i + 1, enabled_display, act_type_display, content_display), tags=tuple(tags))
+            self.tree.insert("", "end", values=(i + 1, enabled_display, act_type_display, content_display, goto_val, retries_val), tags=tuple(tags))
         
         # 선택 및 스크롤 위치 복원
-        if selection:
-            self.tree.selection_set(selection)
-            self.tree.focus(selection[0])
+        try:
+            if selection:
+                self.tree.selection_set(selection)
+                if selection:
+                    self.tree.focus(selection[0])
+        except tk.TclError:
+            # 항목이 존재하지 않으면 선택을 복원하지 않음
+            pass
         self.tree.yview_moveto(scroll_pos[0])
 
 
@@ -1414,6 +1606,7 @@ class EMRSequenceApp:
 
         global_delay = self.delay_var.get()
         self.is_running = True
+        self.retry_counts = {}
         self.status_label.config(text=f"'{self.current_process}' 진행 중...", foreground="red")
         self.start_btn.config(state=tk.DISABLED)
         self.start_from_btn.config(state=tk.DISABLED)
@@ -1471,19 +1664,22 @@ class EMRSequenceApp:
                 pass
 
     def rpa_task(self, actions, global_delay, start_index=0):
-        try:
-            for i in range(start_index, len(actions)):
-                act = actions[i]
-                
-                if not self.is_running: break
+        i = start_index
+        while i < len(actions):
+            if not self.is_running:
+                break
+            
+            act = actions[i]
+            
+            self.root.after(0, lambda item_id=self.tree.get_children()[i]: (
+                self.tree.selection_set(item_id), self.tree.see(item_id)
+            ))
+            
+            if not act.get("enabled", True):
+                i += 1
+                continue
 
-                self.root.after(0, lambda item_id=self.tree.get_children()[i]: (
-                    self.tree.selection_set(item_id), self.tree.see(item_id)
-                ))
-                
-                if not act.get("enabled", True):
-                    continue
-
+            try:
                 if act["type"] == "click":
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
@@ -1501,7 +1697,7 @@ class EMRSequenceApp:
                         if not self.is_running: break
                         if k:
                             pyautogui.press(k)
-                            time.sleep(0.01) # 입력 간 0.01초 딜레이
+                            time.sleep(0.01)
                     time.sleep(0.5)
 
                 elif act["type"] == "date_input":
@@ -1555,25 +1751,53 @@ class EMRSequenceApp:
                     except Exception as e:
                         raise Exception(f"경로를 열 수 없습니다: {os.path.basename(act['path'])}\n{e}")
 
+                # 성공 시 재시도 횟수 초기화
+                if i in self.retry_counts:
+                    self.retry_counts[i] = 0
+                
+                i += 1 # 다음 단계로
 
-                if i < len(actions) - 1 and self.is_running:
-                    delay_elapsed = 0
-                    while delay_elapsed < global_delay:
-                        if not self.is_running: break
-                        time.sleep(0.1)
-                        delay_elapsed += 0.1
+            except Exception as e:
+                failure_config = act.get("on_failure")
+                if failure_config and failure_config.get("enabled"):
+                    goto_step = failure_config.get("goto")
+                    if goto_step is not None and 1 <= goto_step <= len(actions):
+                        retry_key = (i, goto_step - 1)
+                        current_retries = self.retry_counts.get(retry_key, 0)
+                        max_retries = failure_config.get("retries", 0)
 
-            if self.is_running:
-                self.root.after(0, lambda: self.status_label.config(text="작업 완료!", foreground="green"))
-            else:
-                self.root.after(0, lambda: self.status_label.config(text="사용자 중단", foreground="orange"))
+                        if current_retries < max_retries:
+                            self.retry_counts[retry_key] = current_retries + 1
+                            i = goto_step - 1
+                            time.sleep(1)
+                            continue
+                        else:
+                            self.root.after(0, lambda e=e: self.status_label.config(text="오류 발생!", foreground="red"))
+                            self.root.after(0, lambda e=e: messagebox.showerror("오류", f"최대 재시도 횟수({max_retries}회)를 초과했습니다.\n\n{str(e)}"))
+                            break
+                    else: # goto_step이 설정되지 않은 경우
+                        self.root.after(0, lambda e=e: self.status_label.config(text="오류 발생!", foreground="red"))
+                        self.root.after(0, lambda e=e: messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}"))
+                        break
+                else:
+                    self.root.after(0, lambda e=e: self.status_label.config(text="오류 발생!", foreground="red"))
+                    self.root.after(0, lambda e=e: messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}"))
+                    break
+            
+            if i < len(actions) and self.is_running:
+                delay_elapsed = 0
+                while delay_elapsed < global_delay:
+                    if not self.is_running: break
+                    time.sleep(0.1)
+                    delay_elapsed += 0.1
+        
+        if i == len(actions) and self.is_running:
+            self.root.after(0, lambda: self.status_label.config(text="작업 완료!", foreground="green"))
+        elif not self.is_running:
+            self.root.after(0, lambda: self.status_label.config(text="사용자 중단", foreground="orange"))
 
-        except Exception as e:
-            self.root.after(0, lambda: self.status_label.config(text="오류 발생!", foreground="red"))
-            self.root.after(0, lambda: messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}"))
+        self.root.after(0, self.reset_ui)
 
-        finally:
-            self.root.after(0, self.reset_ui)
 
     def reset_ui(self):
         self.is_running = False
