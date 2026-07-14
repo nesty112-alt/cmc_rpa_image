@@ -7,6 +7,7 @@ import os
 import sys
 import pyautogui
 import pyperclip
+import base64
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 
@@ -590,6 +591,7 @@ class EMRSequenceApp:
 
         ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 비밀번호 입력", command=self.add_password, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 날짜 입력", command=self.add_date_input, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
@@ -948,6 +950,16 @@ class EMRSequenceApp:
                 self.update_treeview()
                 self.save_config()
 
+    def add_password(self):
+        file_path, click_pos, click_type = self.get_image_and_click_pos()
+        if file_path:
+            password = simpledialog.askstring("비밀번호 입력", "입력할 비밀번호를 적어주세요:", show='*', parent=self.root)
+            if password is not None:
+                action = {"type": "password", "image": file_path, "text": password, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+                self.processes[self.current_process].append(action)
+                self.update_treeview()
+                self.save_config()
+
     def add_wait_image(self):
         file_path = self.get_image_path_for_wait()
         if file_path:
@@ -1033,7 +1045,7 @@ class EMRSequenceApp:
         idx = self.tree.index(selected_item[0])
         act = self.processes[self.current_process][idx]
 
-        if act["type"] in ["click", "type"]:
+        if act["type"] in ["click", "type", "password"]:
             file_path, click_pos, click_type = self.get_image_and_click_pos(is_edit=True, current_action=act)
             if file_path:
                 act["image"] = file_path
@@ -1042,6 +1054,10 @@ class EMRSequenceApp:
 
             if act["type"] == "type":
                 new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""), parent=self.root)
+                if new_text is not None:
+                    act["text"] = new_text
+            elif act["type"] == "password":
+                new_text = simpledialog.askstring("비밀번호 수정", "새로운 비밀번호를 입력하세요:", show='*', initialvalue=act.get("text", ""), parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
 
@@ -1153,6 +1169,9 @@ class EMRSequenceApp:
             elif act["type"] == "type":
                 act_type_display = "[더블클릭 & 입력]" if act.get("click_type") == "double" else "[클릭 & 입력]"
                 content_display = alias if alias else f"{os.path.basename(act['image'])} -> '{act['text']}'"
+            elif act["type"] == "password":
+                act_type_display = "[비밀번호 입력]"
+                content_display = alias if alias else f"{os.path.basename(act['image'])} -> '***'"
             elif act["type"] == "key":
                 act_type_display = "[키보드]"
                 keys_display = " -> ".join(act.get("keys", [act.get("key", "")] ))
@@ -1196,6 +1215,13 @@ class EMRSequenceApp:
         if self.root.state() == 'normal':
             geometry = self.root.geometry()
 
+        # 저장 시 비밀번호 암호화
+        processes_to_save = json.loads(json.dumps(self.processes))
+        for proc, actions in processes_to_save.items():
+            for act in actions:
+                if act.get("type") == "password" and "text" in act:
+                    act["text"] = base64.b64encode(act["text"].encode('utf-8')).decode('utf-8')
+
         data = {
             "settings": {
                 "default_delay": self.delay_var.get(),
@@ -1206,7 +1232,7 @@ class EMRSequenceApp:
                 "confidence": self.confidence_var.get()
             },
             "schedules": self.schedules,
-            "processes": self.processes
+            "processes": processes_to_save
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
@@ -1250,6 +1276,7 @@ class EMRSequenceApp:
             self.processes = {"기본 프로세스": []}
         self.current_process = list(self.processes.keys())[0]
 
+        # 불러온 후 비밀번호 복호화
         for proc, actions in self.processes.items():
             for act in actions:
                 if "alias" not in act:
@@ -1260,6 +1287,12 @@ class EMRSequenceApp:
                     act["click_type"] = "single"
                 if "enabled" not in act:
                     act["enabled"] = True
+                if act.get("type") == "password" and "text" in act:
+                    try:
+                        act["text"] = base64.b64decode(act["text"].encode('utf-8')).decode('utf-8')
+                    except:
+                        # 디코딩 실패 시 (예: 구 버전 데이터) 원본 유지
+                        pass
 
     def schedule_checker(self):
         while True:
@@ -1455,7 +1488,7 @@ class EMRSequenceApp:
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
 
-                elif act["type"] == "type":
+                elif act["type"] == "type" or act["type"] == "password":
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
                     time.sleep(0.5)
