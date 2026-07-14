@@ -622,6 +622,33 @@ class EMRSequenceApp:
         return [elm for elm in style.map('Treeview', query_opt=option) if
                 elm[:2] != ('!disabled', '!selected')]
 
+    def _resolve_path(self, path):
+        """저장된 상대 경로를 절대 경로로 변환. 이미 절대 경로인 경우 그대로 반환."""
+        if not path or os.path.isabs(path):
+            return path
+        return os.path.join(application_path, path)
+
+    def _get_relative_path(self, path):
+        """절대 경로를 앱 기준의 상대 경로로 변환. 앱 폴더 밖의 경로는 절대 경로로 유지."""
+        if not path:
+            return ""
+        abs_path = os.path.abspath(path)
+        app_abs_path = os.path.abspath(application_path)
+        
+        # Windows에서 드라이브가 다른 경우 relpath가 오류를 일으키므로 절대 경로 반환
+        if os.name == 'nt':
+            if os.path.splitdrive(abs_path)[0].lower() != os.path.splitdrive(app_abs_path)[0].lower():
+                return abs_path
+
+        # 경로가 애플리케이션 폴더 내에 있는 경우 상대 경로로 변환
+        if abs_path.lower().startswith(app_abs_path.lower()):
+            try:
+                return os.path.relpath(abs_path, app_abs_path)
+            except ValueError:
+                return abs_path # 예외 발생 시 절대 경로로 대체
+        
+        return abs_path
+
     def create_widgets(self):
         """UI 구성"""
         top_frame = ttk.Frame(self.root, padding=10)
@@ -876,7 +903,7 @@ class EMRSequenceApp:
     def open_settings_window(self):
         settings_win = tk.Toplevel(self.root)
         settings_win.title("환경설정")
-        settings_win.geometry("300x200")
+        settings_win.geometry("400x300")
         settings_win.resizable(False, False)
         settings_win.transient(self.root)
         settings_win.grab_set()
@@ -895,16 +922,74 @@ class EMRSequenceApp:
         if not WINREG_AVAILABLE:
             autostart_cb.config(state=tk.DISABLED)
 
-        confidence_label = ttk.Label(frame, text=f"이미지 인식 정확도: {self.confidence_var.get():.2f}")
-        confidence_label.pack(anchor="w", pady=(10, 0))
-        confidence_scale = tk.Scale(frame, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.confidence_var,
+        confidence_frame = ttk.Frame(frame)
+        confidence_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        confidence_label = ttk.Label(confidence_frame, text=f"이미지 인식 정확도: {self.confidence_var.get():.2f}")
+        confidence_label.pack(anchor="w")
+        
+        confidence_scale = tk.Scale(confidence_frame, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.confidence_var,
                                     command=lambda val: confidence_label.config(text=f"이미지 인식 정확도: {float(val):.2f}"))
         confidence_scale.pack(fill=tk.X)
         confidence_scale.bind("<ButtonRelease-1>", lambda e: self.save_config())
 
+        help_text = "Tip: 이미지를 잘 찾지 못하면 이 값을 낮춰보세요. (예: 0.7)"
+        help_label = ttk.Label(confidence_frame, text=help_text, foreground="gray", font=("맑은 고딕", 8))
+        help_label.pack(anchor="e")
+
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
+
+        clean_btn = ttk.Button(frame, text="사용하지 않는 이미지 정리", command=self.clean_unused_images)
+        clean_btn.pack(pady=5)
 
         close_btn = ttk.Button(frame, text="닫기", command=settings_win.destroy)
         close_btn.pack(pady=10)
+
+    def clean_unused_images(self):
+        captures_path = os.path.join(application_path, "captures")
+        if not os.path.isdir(captures_path):
+            messagebox.showinfo("알림", "captures 폴더가 존재하지 않습니다.", parent=self.root)
+            return
+
+        used_images = set()
+        for proc_name, actions in self.processes.items():
+            for act in actions:
+                if "image" in act and act["image"]:
+                    # 정규화된 경로로 비교하기 위해 절대 경로로 변환
+                    used_images.add(os.path.normpath(self._resolve_path(act["image"])))
+
+        all_images_in_folder = set()
+        for root, _, files in os.walk(captures_path):
+            for name in files:
+                if name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    all_images_in_folder.add(os.path.normpath(os.path.join(root, name)))
+
+        unused_images = all_images_in_folder - used_images
+        
+        if not unused_images:
+            messagebox.showinfo("알림", "사용하지 않는 이미지가 없습니다.", parent=self.root)
+            return
+
+        msg = f"{len(unused_images)}개의 사용하지 않는 이미지를 찾았습니다. 삭제하시겠습니까?\n\n"
+        msg += "\n".join([os.path.basename(p) for p in list(unused_images)[:10]]) # 최대 10개만 미리보기
+        if len(unused_images) > 10:
+            msg += "\n..."
+
+        if messagebox.askyesno("이미지 정리", msg, parent=self.root):
+            deleted_count = 0
+            error_files = []
+            for img_path in unused_images:
+                try:
+                    os.remove(img_path)
+                    deleted_count += 1
+                except OSError as e:
+                    error_files.append(os.path.basename(img_path))
+            
+            final_msg = f"{deleted_count}개의 이미지를 삭제했습니다."
+            if error_files:
+                final_msg += f"\n\n다음 파일들은 삭제하지 못했습니다:\n" + "\n".join(error_files)
+            
+            messagebox.showinfo("완료", final_msg, parent=self.root)
 
     def on_process_change(self, event=None):
         self.current_process = self.combo_process.get()
@@ -1054,7 +1139,10 @@ class EMRSequenceApp:
                 snipper.result_img.save(file_path)
 
         elif choice is False:
-            file_path = filedialog.askopenfilename(title="이미지 선택", filetypes=[("Image files", "*.png *.jpg")])
+            initial_dir = os.path.join(application_path, "captures")
+            file_path = filedialog.askopenfilename(title="이미지 선택", 
+                                                 initialdir=initial_dir,
+                                                 filetypes=[("Image files", "*.png *.jpg")])
 
         else: # Cancel
             if is_edit and current_action:
@@ -1095,7 +1183,10 @@ class EMRSequenceApp:
                 return file_path
 
         elif choice is False:
-            return filedialog.askopenfilename(title="이미지 선택", filetypes=[("Image files", "*.png *.jpg")])
+            initial_dir = os.path.join(application_path, "captures")
+            return filedialog.askopenfilename(title="이미지 선택", 
+                                            initialdir=initial_dir,
+                                            filetypes=[("Image files", "*.png *.jpg")])
         
         else:
             if is_edit and current_action:
@@ -1107,7 +1198,7 @@ class EMRSequenceApp:
         self.save_state_for_undo()
         file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
-            action = {"type": "click", "image": file_path, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+            action = {"type": "click", "image": self._get_relative_path(file_path), "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -1118,7 +1209,7 @@ class EMRSequenceApp:
         if file_path:
             text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:", parent=self.root)
             if text is not None:
-                action = {"type": "type", "image": file_path, "text": text, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+                action = {"type": "type", "image": self._get_relative_path(file_path), "text": text, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1129,7 +1220,7 @@ class EMRSequenceApp:
         if file_path:
             password = simpledialog.askstring("비밀번호 입력", "입력할 비밀번호를 적어주세요:", show='*', parent=self.root)
             if password is not None:
-                action = {"type": "password", "image": file_path, "text": password, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+                action = {"type": "password", "image": self._get_relative_path(file_path), "text": password, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1141,7 +1232,7 @@ class EMRSequenceApp:
             timeout = simpledialog.askfloat("타임아웃 설정", "이미지가 나타날 때까지 기다릴 최대 시간(초)을 입력하세요\n(예: 10초 이내에 안 나타나면 오류 처리):",
                                             initialvalue=10.0, parent=self.root)
             if timeout is not None:
-                action = {"type": "wait_image", "image": file_path, "timeout": timeout, "alias": "", "enabled": True}
+                action = {"type": "wait_image", "image": self._get_relative_path(file_path), "timeout": timeout, "alias": "", "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1181,7 +1272,7 @@ class EMRSequenceApp:
         self.save_state_for_undo()
         file_path = filedialog.askopenfilename(title="실행할 파일 선택")
         if file_path:
-            action = {"type": "exec_file", "path": file_path, "alias": "", "enabled": True}
+            action = {"type": "exec_file", "path": self._get_relative_path(file_path), "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -1190,7 +1281,7 @@ class EMRSequenceApp:
         self.save_state_for_undo()
         dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택")
         if dir_path:
-            action = {"type": "open_path", "path": dir_path, "alias": "", "enabled": True}
+            action = {"type": "open_path", "path": self._get_relative_path(dir_path), "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -1230,7 +1321,7 @@ class EMRSequenceApp:
         if act["type"] in ["click", "type", "password"]:
             file_path, click_pos, click_type = self.get_image_and_click_pos(is_edit=True, current_action=act)
             if file_path:
-                act["image"] = file_path
+                act["image"] = self._get_relative_path(file_path)
                 act["click_pos"] = click_pos
                 act["click_type"] = click_type
 
@@ -1246,7 +1337,7 @@ class EMRSequenceApp:
         elif act["type"] == "wait_image":
             file_path = self.get_image_path_for_wait(is_edit=True, current_action=act)
             if file_path:
-                act["image"] = file_path
+                act["image"] = self._get_relative_path(file_path)
             new_timeout = simpledialog.askfloat("타임아웃 수정", "새로운 최대 대기 시간(초)을 입력하세요:",
                                                 initialvalue=act.get("timeout", 10.0), parent=self.root)
             if new_timeout is not None:
@@ -1274,14 +1365,16 @@ class EMRSequenceApp:
                 act["time"] = new_time
         
         elif act["type"] == "exec_file":
-            new_path = filedialog.askopenfilename(title="실행할 파일 선택", initialfile=act.get("path"))
+            initial_file = self._resolve_path(act.get("path"))
+            new_path = filedialog.askopenfilename(title="실행할 파일 선택", initialfile=initial_file)
             if new_path:
-                act["path"] = new_path
+                act["path"] = self._get_relative_path(new_path)
         
         elif act["type"] == "open_path":
-            new_path = filedialog.askdirectory(title="열고 싶은 폴더 선택", initialdir=act.get("path"))
+            initial_dir = self._resolve_path(act.get("path"))
+            new_path = filedialog.askdirectory(title="열고 싶은 폴더 선택", initialdir=initial_dir)
             if new_path:
-                act["path"] = new_path
+                act["path"] = self._get_relative_path(new_path)
 
         self.update_treeview()
         self.save_config()
@@ -1367,7 +1460,7 @@ class EMRSequenceApp:
 
         for idx in selected_indices:
             item_to_move = actions.pop(idx)
-            actions.insert(idx + 1, actions.pop(idx))
+            actions.insert(idx + 1, item_to_move)
 
             # UI 상에서 아이템 이동
             item_id = self.tree.get_children()[idx]
@@ -1404,16 +1497,20 @@ class EMRSequenceApp:
             
             act_type_display = ""
             content_display = ""
+            
+            path_in_act = act.get("image") or act.get("path")
 
             if act["type"] == "click":
                 act_type_display = "[더블클릭]" if act.get("click_type") == "double" else "[클릭]"
-                content_display = alias if alias else os.path.basename(act["image"])
+                content_display = alias if alias else os.path.basename(self._resolve_path(act["image"]))
             elif act["type"] == "type":
                 act_type_display = "[더블클릭 & 입력]" if act.get("click_type") == "double" else "[클릭 & 입력]"
-                content_display = alias if alias else f"{os.path.basename(act['image'])} -> '{act['text']}'"
+                image_name = os.path.basename(self._resolve_path(act['image']))
+                content_display = alias if alias else f"{image_name} -> '{act['text']}'"
             elif act["type"] == "password":
                 act_type_display = "[비밀번호 입력]"
-                content_display = alias if alias else f"{os.path.basename(act['image'])} -> '***'"
+                image_name = os.path.basename(self._resolve_path(act['image']))
+                content_display = alias if alias else f"{image_name} -> '***'"
             elif act["type"] == "key":
                 act_type_display = "[키보드]"
                 keys_display = " -> ".join(act.get("keys", [act.get("key", "")] ))
@@ -1426,13 +1523,14 @@ class EMRSequenceApp:
                 content_display = alias if alias else f"{act['time']}초"
             elif act["type"] == "wait_image":
                 act_type_display = "[이미지 확인]"
-                content_display = alias if alias else f"{os.path.basename(act['image'])} (최대 {act['timeout']}초)"
+                image_name = os.path.basename(self._resolve_path(act['image']))
+                content_display = alias if alias else f"{image_name} (최대 {act['timeout']}초)"
             elif act["type"] == "exec_file":
                 act_type_display = "[파일 실행]"
-                content_display = alias if alias else os.path.basename(act["path"])
+                content_display = alias if alias else os.path.basename(self._resolve_path(act["path"]))
             elif act["type"] == "open_path":
                 act_type_display = "[경로 열기]"
-                content_display = alias if alias else os.path.basename(act["path"])
+                content_display = alias if alias else os.path.basename(self._resolve_path(act["path"]))
 
             on_failure = act.get("on_failure")
             goto_val = ""
@@ -1685,7 +1783,8 @@ class EMRSequenceApp:
 
     def execute_click(self, image_path, click_pos, click_type="single"):
         try:
-            img = Image.open(image_path)
+            resolved_path = self._resolve_path(image_path)
+            img = Image.open(resolved_path)
             location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get(), grayscale=True)
             if location:
                 click_x = location.left + location.width / 2
@@ -1703,7 +1802,7 @@ class EMRSequenceApp:
                 return True
             return False
         except Exception as e:
-            print(f"이미지 읽기 또는 클릭 오류: {e}")
+            print(f"이미지 읽기 또는 클릭 오류 ({resolved_path}): {e}")
             return False
 
     def type_text_char_by_char(self, text, char_interval=0.05):
@@ -1778,7 +1877,7 @@ class EMRSequenceApp:
 
                 elif act["type"] == "wait_image":
                     timeout = act.get("timeout", 10.0)
-                    img_path = act["image"]
+                    img_path = self._resolve_path(act["image"])
                     try:
                         img = Image.open(img_path)
                     except Exception:
@@ -1803,13 +1902,13 @@ class EMRSequenceApp:
                 
                 elif act["type"] == "exec_file":
                     try:
-                        os.startfile(act["path"])
+                        os.startfile(self._resolve_path(act["path"]))
                     except Exception as e:
                         raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
                 
                 elif act["type"] == "open_path":
                     try:
-                        os.startfile(act["path"])
+                        os.startfile(self._resolve_path(act["path"]))
                     except Exception as e:
                         raise Exception(f"경로를 열 수 없습니다: {os.path.basename(act['path'])}\n{e}")
 
