@@ -186,7 +186,7 @@ class SnippingTool:
         except Exception as e:
             messagebox.showerror("캡쳐 오류", f"화면을 캡쳐하는 중 오류가 발생했습니다:\n{e}")
             self.result_img = None
-
+        
         self.snip_window.destroy()
 
     def cancel(self):
@@ -1686,7 +1686,7 @@ class EMRSequenceApp:
     def execute_click(self, image_path, click_pos, click_type="single"):
         try:
             img = Image.open(image_path)
-            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get())
+            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get(), grayscale=True)
             if location:
                 click_x = location.left + location.width / 2
                 click_y = location.top + location.height / 2
@@ -1790,7 +1790,7 @@ class EMRSequenceApp:
                     while time.time() - start_time < timeout:
                         if not self.is_running: break
                         try:
-                            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get())
+                            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get(), grayscale=True)
                             if location:
                                 found = True
                                 break
