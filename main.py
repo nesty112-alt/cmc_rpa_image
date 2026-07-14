@@ -17,8 +17,33 @@ def center_window(win):
     win.update_idletasks()
     width = win.winfo_width()
     height = win.winfo_height()
-    x = (win.winfo_screenwidth() // 2) - (width // 2)
-    y = (win.winfo_screenheight() // 2) - (height // 2)
+
+    x, y = 0, 0
+    try:
+        # PYWIN32를 사용하여 주 모니터의 중앙에 위치시키기
+        import win32api
+        import win32con
+        
+        # 기본 모니터 핸들 가져오기
+        monitor_handle = win32api.MonitorFromPoint((0, 0), win32con.MONITOR_DEFAULTTOPRIMARY)
+        monitor_info = win32api.GetMonitorInfo(monitor_handle)
+        monitor_area = monitor_info['Monitor']
+        work_area = monitor_info['Work']
+
+        # 모니터의 작업 영역 중앙 계산
+        mon_x = work_area[0]
+        mon_y = work_area[1]
+        mon_width = work_area[2] - mon_x
+        mon_height = work_area[3] - mon_y
+        
+        x = mon_x + (mon_width - width) // 2
+        y = mon_y + (mon_height - height) // 2
+
+    except (ImportError, AttributeError):
+        # PYWIN32가 없거나 관련 함수 실패 시 기존 방식으로 대체
+        x = (win.winfo_screenwidth() // 2) - (width // 2)
+        y = (win.winfo_screenheight() // 2) - (height // 2)
+
     win.geometry(f'{width}x{height}+{x}+{y}')
 
 # Windows 디스플레이 확대/축소(DPI) 설정 시 캡쳐 영역 어긋남 방지
