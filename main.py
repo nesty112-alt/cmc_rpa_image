@@ -5,12 +5,16 @@ import time
 import json
 import os
 import sys
+import subprocess
 import pyautogui
 import pyperclip
 import base64
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 import copy
+
+# --- COM 스레딩 모델 설정 (Tkinter 폴더 대화상자와 pywinauto 충돌로 인한 응답없음 방지) ---
+sys.coinit_flags = 2  # COINIT_APARTMENTTHREADED (STA 모드 강제 지정)
 
 # --- UI 객체 인식(pywinauto) 라이브러리 로드 ---
 try:
@@ -939,7 +943,7 @@ class EMRSequenceApp:
                    width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, style="Left.TButton", width=btn_width).pack(
             pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, style="Left.TButton", width=btn_width).pack(
+        ttk.Button(right_frame, text="+ 폴더 열기", command=self.add_open_path, style="Left.TButton", width=btn_width).pack(
             pady=3, fill=tk.X)
 
         ttk.Button(right_frame, text="실패 시 동작 설정", command=self.set_failure_action, style="Left.TButton",
@@ -1350,10 +1354,12 @@ class EMRSequenceApp:
                 snipper.result_img.save(file_path)
 
         elif choice is False:
-            initial_dir = os.path.join(application_path, "captures")
+            initial_dir = os.path.normpath(os.path.join(application_path, "captures"))
+            self.root.update_idletasks()  # UI 안정화
             file_path = filedialog.askopenfilename(title="이미지 선택",
                                                    initialdir=initial_dir,
                                                    filetypes=[("Image files", "*.png *.jpg")])
+            self.root.focus_force()  # 포커스 강제 회수
 
         else:  # Cancel
             if is_edit and current_action:
@@ -1394,10 +1400,13 @@ class EMRSequenceApp:
                 return file_path
 
         elif choice is False:
-            initial_dir = os.path.join(application_path, "captures")
-            return filedialog.askopenfilename(title="이미지 선택",
-                                              initialdir=initial_dir,
-                                              filetypes=[("Image files", "*.png *.jpg")])
+            initial_dir = os.path.normpath(os.path.join(application_path, "captures"))
+            self.root.update_idletasks()  # UI 안정화
+            selected = filedialog.askopenfilename(title="이미지 선택",
+                                                  initialdir=initial_dir,
+                                                  filetypes=[("Image files", "*.png *.jpg")])
+            self.root.focus_force()  # 포커스 강제 회수
+            return selected
 
         else:
             if is_edit and current_action:
@@ -1516,7 +1525,12 @@ class EMRSequenceApp:
 
     def add_exec_file(self):
         self.save_state_for_undo()
-        file_path = filedialog.askopenfilename(title="실행할 파일 선택")
+        initial_dir = os.path.normpath(application_path)
+        self.root.update_idletasks()  # UI 안정화
+        # parent 인자 제거 및 포커스 관리 로직 추가
+        file_path = filedialog.askopenfilename(title="실행할 파일 선택", initialdir=initial_dir)
+        self.root.focus_force()  # 포커스 강제 회수
+
         if file_path:
             action = {"type": "exec_file", "path": self._get_relative_path(file_path), "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
@@ -1525,7 +1539,14 @@ class EMRSequenceApp:
 
     def add_open_path(self):
         self.save_state_for_undo()
-        dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택")
+        initial_dir = os.path.normpath(application_path)
+        self.root.update_idletasks()  # 다이얼로그 호출 전 UI 상태 업데이트
+
+        # parent=self.root를 제거하여 COM 스레딩 충돌이나 숨김 현상 방지
+        dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택", initialdir=initial_dir)
+
+        self.root.focus_force()  # 선택 후 포커스 복귀
+
         if dir_path:
             action = {"type": "open_path", "path": self._get_relative_path(dir_path), "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
@@ -1637,13 +1658,20 @@ class EMRSequenceApp:
 
         elif act["type"] == "exec_file":
             initial_file = self._resolve_path(act.get("path"))
-            new_path = filedialog.askopenfilename(title="실행할 파일 선택", initialfile=initial_file)
+            initial_dir = os.path.dirname(initial_file) if initial_file else application_path
+            initial_dir = os.path.normpath(initial_dir)
+            self.root.update_idletasks()
+            new_path = filedialog.askopenfilename(title="실행할 파일 선택", initialdir=initial_dir, initialfile=initial_file)
+            self.root.focus_force()
             if new_path:
                 act["path"] = self._get_relative_path(new_path)
 
         elif act["type"] == "open_path":
-            initial_dir = self._resolve_path(act.get("path"))
+            initial_dir = self._resolve_path(act.get("path")) if act.get("path") else application_path
+            initial_dir = os.path.normpath(initial_dir)
+            self.root.update_idletasks()
             new_path = filedialog.askdirectory(title="열고 싶은 폴더 선택", initialdir=initial_dir)
+            self.root.focus_force()
             if new_path:
                 act["path"] = self._get_relative_path(new_path)
 
@@ -1811,7 +1839,7 @@ class EMRSequenceApp:
                 act_type_display = "[파일 실행]"
                 content_display = alias if alias else os.path.basename(self._resolve_path(act["path"]))
             elif act["type"] == "open_path":
-                act_type_display = "[경로 열기]"
+                act_type_display = "[폴더 열기]"
                 content_display = alias if alias else os.path.basename(self._resolve_path(act["path"]))
 
             on_failure = act.get("on_failure")
@@ -2257,17 +2285,19 @@ class EMRSequenceApp:
                     if self.is_running and not found:
                         raise Exception(f"시간 초과: {timeout}초 내에 이미지를 찾을 수 없습니다\n({os.path.basename(img_path)})")
 
-                elif act["type"] == "exec_file":
+                elif act["type"] == "exec_file" or act["type"] == "open_path":
+                    path = self._resolve_path(act["path"])
+                    if not os.path.exists(path):
+                        raise FileNotFoundError(f"경로를 찾을 수 없습니다: {path}")
                     try:
-                        os.startfile(self._resolve_path(act["path"]))
+                        if sys.platform == "win32":
+                            os.startfile(path)
+                        elif sys.platform == "darwin":
+                            subprocess.run(["open", path])
+                        else:
+                            subprocess.run(["xdg-open", path])
                     except Exception as e:
-                        raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
-
-                elif act["type"] == "open_path":
-                    try:
-                        os.startfile(self._resolve_path(act["path"]))
-                    except Exception as e:
-                        raise Exception(f"경로를 열 수 없습니다: {os.path.basename(act['path'])}\n{e}")
+                        raise Exception(f"경로를 열 수 없습니다: {os.path.basename(path)}\n{e}")
 
                 # 성공 시 재시도 횟수 초기화
                 if i in self.retry_counts:
