@@ -12,6 +12,14 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 import copy
 
+# --- UI 객체 인식(pywinauto) 라이브러리 로드 ---
+try:
+    from pywinauto import Desktop
+
+    PYWINAUTO_AVAILABLE = True
+except ImportError:
+    PYWINAUTO_AVAILABLE = False
+
 
 # --- 유틸리티 함수 ---
 def center_window(win):
@@ -273,6 +281,79 @@ class ClickPointSelector:
         if not self.click_pos:
             self.click_pos = (self.pil_image.width // 2, self.pil_image.height // 2)
         self.click_type = "double" if self.double_click_var.get() else "single"
+        self.win.destroy()
+
+
+# --- UI 객체 속성 입력을 위한 클래스 (pywinauto 용) ---
+class UIObjectSettingDialog:
+    def __init__(self, parent, initial_data=None):
+        self.parent = parent
+        self.result = None
+        if initial_data is None:
+            initial_data = {}
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("UI 객체 속성 입력")
+        self.win.geometry("450x420")
+        self.win.transient(parent)
+        self.win.grab_set()
+        center_window(self.win)
+
+        main_frame = ttk.Frame(self.win, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        info_text = ("Accessibility Insights 등의 도구를 통해 알아낸\n"
+                     "객체의 고유 속성을 입력하세요. (최소 1개 이상 입력)")
+        ttk.Label(main_frame, text=info_text, justify=tk.CENTER, foreground="blue").pack(pady=(0, 15))
+
+        # Auto ID
+        frame_id = ttk.Frame(main_frame)
+        frame_id.pack(fill="x", pady=5)
+        ttk.Label(frame_id, text="Auto ID (AutomationId):", width=20).pack(side=tk.LEFT)
+        self.auto_id_var = tk.StringVar(value=initial_data.get("auto_id", ""))
+        ttk.Entry(frame_id, textvariable=self.auto_id_var).pack(side=tk.LEFT, fill="x", expand=True)
+
+        # Title / Name
+        frame_title = ttk.Frame(main_frame)
+        frame_title.pack(fill="x", pady=5)
+        ttk.Label(frame_title, text="Title / Name:", width=20).pack(side=tk.LEFT)
+        self.title_var = tk.StringVar(value=initial_data.get("title", ""))
+        ttk.Entry(frame_title, textvariable=self.title_var).pack(side=tk.LEFT, fill="x", expand=True)
+
+        # Control Type
+        frame_type = ttk.Frame(main_frame)
+        frame_type.pack(fill="x", pady=5)
+        ttk.Label(frame_type, text="Control Type (선택):", width=20).pack(side=tk.LEFT)
+        self.control_type_var = tk.StringVar(value=initial_data.get("control_type", ""))
+        ttk.Entry(frame_type, textvariable=self.control_type_var).pack(side=tk.LEFT, fill="x", expand=True)
+        ttk.Label(main_frame, text="예: Button, Edit, Pane, Window 등", font=("맑은 고딕", 8), foreground="gray").pack(
+            anchor="w", padx=140)
+
+        self.double_click_var = tk.BooleanVar(value=initial_data.get("double_click", False))
+        ttk.Checkbutton(main_frame, text="더블 클릭", variable=self.double_click_var).pack(pady=(15, 0), anchor="w")
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=(30, 0))
+
+        ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton", width=15).pack(side=tk.LEFT,
+                                                                                                    padx=10)
+        ttk.Button(btn_frame, text="취소", command=self.win.destroy, width=15).pack(side=tk.LEFT, padx=10)
+
+    def on_ok(self):
+        auto_id = self.auto_id_var.get().strip()
+        title = self.title_var.get().strip()
+        control_type = self.control_type_var.get().strip()
+
+        if not auto_id and not title and not control_type:
+            messagebox.showerror("오류", "최소 하나 이상의 속성을 입력해야 객체를 찾을 수 있습니다.", parent=self.win)
+            return
+
+        self.result = {
+            "auto_id": auto_id,
+            "title": title,
+            "control_type": control_type,
+            "double_click": self.double_click_var.get()
+        }
         self.win.destroy()
 
 
@@ -555,6 +636,48 @@ class FailureActionDialog:
         self.win.destroy()
 
 
+# --- 텍스트 입력 및 암호화 설정을 위한 클래스 ---
+class TextEncryptionDialog:
+    def __init__(self, parent, initial_text="", initial_encrypted=False):
+        self.parent = parent
+        self.result = None
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("텍스트 입력")
+        self.win.geometry("400x200")
+        self.win.transient(parent)
+        self.win.grab_set()
+        center_window(self.win)
+
+        main_frame = ttk.Frame(self.win, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="입력할 텍스트를 적어주세요:").pack(anchor="w")
+
+        self.text_var = tk.StringVar(value=initial_text)
+        ttk.Entry(main_frame, textvariable=self.text_var, width=50).pack(fill="x", pady=5)
+
+        self.encrypt_var = tk.BooleanVar(value=initial_encrypted)
+        ttk.Checkbutton(main_frame, text="암호화하여 저장 (리스트에 ***로 표시)", variable=self.encrypt_var).pack(anchor="w", pady=10)
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=(10, 0))
+
+        ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton").pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="취소", command=self.win.destroy).pack(side=tk.LEFT, padx=10)
+
+    def on_ok(self):
+        text = self.text_var.get()
+        is_encrypted = self.encrypt_var.get()
+
+        if is_encrypted and not text:
+            messagebox.showwarning("경고", "암호화할 내용이 없습니다.", parent=self.win)
+            return
+
+        self.result = (text, is_encrypted)
+        self.win.destroy()
+
+
 class EMRSequenceApp:
     def __init__(self, root):
         self.root = root
@@ -797,10 +920,17 @@ class EMRSequenceApp:
             pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, style="Left.TButton", width=btn_width).pack(
             pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 비밀번호 입력", command=self.add_password, style="Left.TButton",
+        ttk.Button(right_frame, text="+ 텍스트(비밀번호)", command=self.add_password, style="Left.TButton",
                    width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key, style="Left.TButton", width=btn_width).pack(
             pady=3, fill=tk.X)
+
+        # --- UI 객체 제어 버튼 추가 ---
+        ttk.Button(right_frame, text="+ UI 객체 클릭", command=self.add_ui_click, style="Left.TButton",
+                   width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ UI 객체 텍스트", command=self.add_ui_type, style="Left.TButton",
+                   width=btn_width).pack(pady=3, fill=tk.X)
+
         ttk.Button(right_frame, text="+ 날짜 입력", command=self.add_date_input, style="Left.TButton",
                    width=btn_width).pack(pady=3, fill=tk.X)
         ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait, style="Left.TButton", width=btn_width).pack(
@@ -1299,12 +1429,43 @@ class EMRSequenceApp:
 
     def add_password(self):
         self.save_state_for_undo()
-        file_path, click_pos, click_type = self.get_image_and_click_pos()
-        if file_path:
-            password = simpledialog.askstring("비밀번호 입력", "입력할 비밀번호를 적어주세요:", show='*', parent=self.root)
-            if password is not None:
-                action = {"type": "password", "image": self._get_relative_path(file_path), "text": password,
-                          "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+        dialog = TextEncryptionDialog(self.root)
+        self.root.wait_window(dialog.win)
+
+        if dialog.result:
+            text, is_encrypted = dialog.result
+            action = {"type": "password", "text": text, "encrypted": is_encrypted, "alias": "", "enabled": True}
+            self.processes[self.current_process].append(action)
+            self.update_treeview()
+            self.save_config()
+
+    # --- UI 객체 동작(pywinauto) 추가 ---
+    def add_ui_click(self):
+        if not PYWINAUTO_AVAILABLE:
+            messagebox.showerror("오류", "pywinauto 라이브러리가 필요합니다.\npip install pywinauto", parent=self.root)
+            return
+        self.save_state_for_undo()
+        dialog = UIObjectSettingDialog(self.root)
+        self.root.wait_window(dialog.win)
+
+        if dialog.result:
+            action = {"type": "ui_click", "identifiers": dialog.result, "alias": "", "enabled": True}
+            self.processes[self.current_process].append(action)
+            self.update_treeview()
+            self.save_config()
+
+    def add_ui_type(self):
+        if not PYWINAUTO_AVAILABLE:
+            messagebox.showerror("오류", "pywinauto 라이브러리가 필요합니다.\npip install pywinauto", parent=self.root)
+            return
+        self.save_state_for_undo()
+        dialog = UIObjectSettingDialog(self.root)
+        self.root.wait_window(dialog.win)
+
+        if dialog.result:
+            text = simpledialog.askstring("텍스트 입력", "UI 객체에 입력할 텍스트를 적어주세요:", parent=self.root)
+            if text is not None:
+                action = {"type": "ui_type", "identifiers": dialog.result, "text": text, "alias": "", "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1403,7 +1564,7 @@ class EMRSequenceApp:
         idx = self.tree.index(selected_item[0])
         act = self.processes[self.current_process][idx]
 
-        if act["type"] in ["click", "type", "password"]:
+        if act["type"] in ["click", "type"]:
             file_path, click_pos, click_type = self.get_image_and_click_pos(is_edit=True, current_action=act)
             if file_path:
                 act["image"] = self._get_relative_path(file_path)
@@ -1415,9 +1576,30 @@ class EMRSequenceApp:
                                                   parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
-            elif act["type"] == "password":
-                new_text = simpledialog.askstring("비밀번호 수정", "새로운 비밀번호를 입력하세요:", show='*',
-                                                  initialvalue=act.get("text", ""), parent=self.root)
+
+        elif act["type"] == "password":
+            is_currently_encrypted = act.get("encrypted", True)
+            dialog = TextEncryptionDialog(self.root, initial_text=act.get("text", ""),
+                                          initial_encrypted=is_currently_encrypted)
+            self.root.wait_window(dialog.win)
+
+            if dialog.result:
+                text, is_encrypted = dialog.result
+                act["text"] = text
+                act["encrypted"] = is_encrypted
+
+        elif act["type"] in ["ui_click", "ui_type"]:
+            if not PYWINAUTO_AVAILABLE:
+                messagebox.showerror("오류", "pywinauto 라이브러리가 필요합니다.", parent=self.root)
+                return
+            dialog = UIObjectSettingDialog(self.root, initial_data=act.get("identifiers", {}))
+            self.root.wait_window(dialog.win)
+            if dialog.result:
+                act["identifiers"] = dialog.result
+
+            if act["type"] == "ui_type" and dialog.result:
+                new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""),
+                                                  parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
 
@@ -1595,9 +1777,22 @@ class EMRSequenceApp:
                 image_name = os.path.basename(self._resolve_path(act['image']))
                 content_display = alias if alias else f"{image_name} -> '{act['text']}'"
             elif act["type"] == "password":
-                act_type_display = "[비밀번호 입력]"
-                image_name = os.path.basename(self._resolve_path(act['image']))
-                content_display = alias if alias else f"{image_name} -> '***'"
+                is_encrypted = act.get("encrypted", True)
+                act_type_display = "[텍스트 입력]"
+                if is_encrypted:
+                    content_display = alias if alias else "'***' 텍스트 입력"
+                else:
+                    content_display = alias if alias else f"'{act.get('text', '')}' 텍스트 입력"
+            elif act["type"] == "ui_click":
+                ids = act.get("identifiers", {})
+                act_type_display = "[UI 더블클릭]" if ids.get("double_click") else "[UI 클릭]"
+                display_id = ids.get("title") or ids.get("auto_id") or ids.get("control_type")
+                content_display = alias if alias else f"객체({display_id}) 클릭"
+            elif act["type"] == "ui_type":
+                ids = act.get("identifiers", {})
+                act_type_display = "[UI 더블클릭&입력]" if ids.get("double_click") else "[UI 텍스트]"
+                display_id = ids.get("title") or ids.get("auto_id") or ids.get("control_type")
+                content_display = alias if alias else f"객체({display_id}) -> '{act.get('text', '')}'"
             elif act["type"] == "key":
                 act_type_display = "[키보드]"
                 keys_display = " -> ".join(act.get("keys", [act.get("key", "")]))
@@ -1629,7 +1824,7 @@ class EMRSequenceApp:
             tags = []
             if not enabled:
                 tags.append('disabled')
-            if act.get("click_pos"):
+            if act.get("click_pos") or act["type"] in ["ui_click", "ui_type"]:
                 tags.append('has_click_pos')
 
             self.tree.tag_configure('disabled', foreground='gray')
@@ -1655,12 +1850,12 @@ class EMRSequenceApp:
         if self.root.state() == 'normal':
             geometry = self.root.geometry()
 
-        # 저장 시 비밀번호 암호화
         processes_to_save = json.loads(json.dumps(self.processes))
         for proc, actions in processes_to_save.items():
             for act in actions:
-                if act.get("type") == "password" and "text" in act:
-                    act["text"] = base64.b64encode(act["text"].encode('utf-8')).decode('utf-8')
+                if act.get("type") == "password":
+                    if act.get("encrypted", True) and "text" in act:
+                        act["text"] = base64.b64encode(act["text"].encode('utf-8')).decode('utf-8')
 
         data = {
             "settings": {
@@ -1723,7 +1918,6 @@ class EMRSequenceApp:
             self.processes = {"기본 프로세스": []}
         self.current_process = list(self.processes.keys())[0]
 
-        # 불러온 후 비밀번호 복호화
         for proc, actions in self.processes.items():
             for act in actions:
                 if "alias" not in act:
@@ -1734,12 +1928,18 @@ class EMRSequenceApp:
                     act["click_type"] = "single"
                 if "enabled" not in act:
                     act["enabled"] = True
-                if act.get("type") == "password" and "text" in act:
-                    try:
-                        act["text"] = base64.b64decode(act["text"].encode('utf-8')).decode('utf-8')
-                    except:
-                        # 디코딩 실패 시 (예: 구 버전 데이터) 원본 유지
-                        pass
+
+                if act.get("type") in ["ui_click", "ui_type"]:
+                    if "identifiers" in act and "double_click" not in act["identifiers"]:
+                        act["identifiers"]["double_click"] = False
+
+                if act.get("type") == "password":
+                    is_encrypted = act.get("encrypted", True)
+                    if is_encrypted and "text" in act:
+                        try:
+                            act["text"] = base64.b64decode(act["text"].encode('utf-8')).decode('utf-8')
+                        except:
+                            pass
 
     def schedule_checker(self):
         while True:
@@ -1876,7 +2076,7 @@ class EMRSequenceApp:
         self.is_running = False
         self.status_label.config(text="정지 중...", foreground="orange")
 
-    # --- 클릭 동작(다중 모니터 좌표 보정 반영) 수정 ---
+    # --- 클릭 동작(다중 모니터 좌표 보정 반영) ---
     def execute_click(self, image_path, click_pos, click_type="single"):
         try:
             resolved_path = self._resolve_path(image_path)
@@ -1885,7 +2085,7 @@ class EMRSequenceApp:
             # 전체 화면 캡처 및 오프셋 정보 획득
             screenshot, v_left, v_top = self.get_full_screenshot_and_offset()
 
-            # pyautogui.locateOnScreen 대신 전체 스크린샷 위에서 locate
+            # pyautogui.locate 대신 전체 스크린샷 위에서 locate
             location = pyautogui.locate(img, screenshot, confidence=self.confidence_var.get(), grayscale=True)
 
             if location:
@@ -1952,12 +2152,58 @@ class EMRSequenceApp:
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
 
-                elif act["type"] == "type" or act["type"] == "password":
+                elif act["type"] == "type":
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
                     time.sleep(self.pre_type_delay_var.get())
                     self.type_text_char_by_char(act["text"])
                     time.sleep(self.post_type_delay_var.get())
+
+                elif act["type"] == "password":
+                    time.sleep(self.pre_type_delay_var.get())
+                    self.type_text_char_by_char(act["text"])
+                    time.sleep(self.post_type_delay_var.get())
+
+                elif act["type"] in ["ui_click", "ui_type"]:
+                    if not PYWINAUTO_AVAILABLE:
+                        raise Exception("pywinauto 라이브러리가 설치되어 있지 않습니다.")
+
+                    ids = act.get("identifiers", {})
+                    kwargs = {}
+                    if ids.get("auto_id"): kwargs["auto_id"] = ids["auto_id"]
+                    if ids.get("title"): kwargs["title"] = ids["title"]
+                    if ids.get("control_type"): kwargs["control_type"] = ids["control_type"]
+
+                    if not kwargs:
+                        raise Exception("찾을 UI 객체 조건이 없습니다.")
+
+                    try:
+                        # Desktop에서 전체 윈도우를 대상으로 객체 검색
+                        desktop = Desktop(backend="uia")
+                        element = desktop.window(**kwargs)
+                        # 요소가 준비될 때까지 잠시 대기 (최대 10초)
+                        element.wait('ready', timeout=10)
+
+                        # 창을 최상단으로 올리기 (포커스)
+                        try:
+                            element.set_focus()
+                        except Exception:
+                            pass
+
+                        # 요소 클릭
+                        if ids.get("double_click"):
+                            element.double_click_input()
+                        else:
+                            element.click_input()
+
+                        # ui_type인 경우 텍스트 입력 추가
+                        if act["type"] == "ui_type":
+                            time.sleep(self.pre_type_delay_var.get())
+                            self.type_text_char_by_char(act["text"])
+                            time.sleep(self.post_type_delay_var.get())
+
+                    except Exception as e:
+                        raise Exception(f"UI 객체를 찾거나 제어할 수 없습니다.\n상세: {e}")
 
                 elif act["type"] == "key":
                     keys = act.get("keys", [act.get("key", "")])
@@ -1996,7 +2242,7 @@ class EMRSequenceApp:
                     while time.time() - start_time < timeout:
                         if not self.is_running: break
                         try:
-                            # --- 대기 시 이미지 찾기(다중 모니터 대응) 수정 ---
+                            # 대기 시 이미지 찾기(다중 모니터 대응)
                             screenshot, _, _ = self.get_full_screenshot_and_offset()
                             location = pyautogui.locate(img, screenshot, confidence=self.confidence_var.get(),
                                                         grayscale=True)
