@@ -790,7 +790,10 @@ class EMRSequenceApp:
         self.update_undo_redo_buttons()
 
         # 스케줄러 시작 시 시간을 기록해두기 위한 변수
-        self.app_start_time = time.time()
+        self.app_start_uptime = 0
+        if GET_TICK_COUNT_AVAILABLE:
+            self.app_start_uptime = ctypes.windll.kernel32.GetTickCount64() / 1000
+            
         threading.Thread(target=self.schedule_checker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -2008,11 +2011,6 @@ class EMRSequenceApp:
         # 시작 시 대기 (EMR 시퀀스 프로그램 UI가 뜨고 로드될 시간을 줌)
         time.sleep(5)
         
-        # 프로그램이 시작된 후 기준 시간을 잡기 위한 시작 uptime 기록
-        start_uptime = 0
-        if GET_TICK_COUNT_AVAILABLE:
-            start_uptime = ctypes.windll.kernel32.GetTickCount64() / 1000
-            
         while True:
             now_time_str = datetime.now().strftime("%H:%M")
             now_date_str = datetime.now().strftime("%Y-%m-%d")
@@ -2037,11 +2035,10 @@ class EMRSequenceApp:
                         minutes, seconds = map(int, schedule_value.split(':'))
                         target_seconds = minutes * 60 + seconds
                         
-                        # "부팅 후(uptime_seconds)" 시간이 프로그램이 켜진 시점(start_uptime)보다 이후인지,
-                        # 혹은 프로그램이 부팅 후 지정 시간 근처에서 시작되었는지를 판단
-                        # 목표 시간에 도달했거나 이미 지난 경우이면서,
-                        # 프로그램이 켜진 시점이 목표 시간 이전이었을 때만 실행하도록 변경
-                        if uptime_seconds >= target_seconds and start_uptime <= target_seconds + 30:
+                        # 앱이 부팅 후 5분(300초) 이내에 시작되었는지 확인 (최근 부팅 판별)
+                        is_recent_boot = self.app_start_uptime < 300
+
+                        if is_recent_boot and uptime_seconds >= target_seconds:
                             should_run = True
                     except (ValueError, TypeError):
                         continue
