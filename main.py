@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 import copy
 
+
 # --- 유틸리티 함수 ---
 def center_window(win):
     win.update_idletasks()
@@ -23,7 +24,7 @@ def center_window(win):
         # PYWIN32를 사용하여 주 모니터의 중앙에 위치시키기
         import win32api
         import win32con
-        
+
         # 기본 모니터 핸들 가져오기
         monitor_handle = win32api.MonitorFromPoint((0, 0), win32con.MONITOR_DEFAULTTOPRIMARY)
         monitor_info = win32api.GetMonitorInfo(monitor_handle)
@@ -35,7 +36,7 @@ def center_window(win):
         mon_y = work_area[1]
         mon_width = work_area[2] - mon_x
         mon_height = work_area[3] - mon_y
-        
+
         x = mon_x + (mon_width - width) // 2
         y = mon_y + (mon_height - height) // 2
 
@@ -46,9 +47,11 @@ def center_window(win):
 
     win.geometry(f'{width}x{height}+{x}+{y}')
 
+
 # Windows 디스플레이 확대/축소(DPI) 설정 시 캡쳐 영역 어긋남 방지
 try:
     import ctypes
+
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
     GET_TICK_COUNT_AVAILABLE = True
 except Exception:
@@ -65,6 +68,7 @@ except ImportError:
 # tkcalendar 라이브러리 (날짜 선택기용)
 try:
     from tkcalendar import Calendar
+
     TKCALENDAR_AVAILABLE = True
 except ImportError:
     TKCALENDAR_AVAILABLE = False
@@ -72,6 +76,7 @@ except ImportError:
 # 부팅 시 자동 실행을 위한 winreg
 try:
     import winreg
+
     WINREG_AVAILABLE = True
 except ImportError:
     WINREG_AVAILABLE = False
@@ -80,10 +85,10 @@ except ImportError:
 try:
     import win32com.client
     import win32api
+
     PYWIN32_AVAILABLE = True
 except ImportError:
     PYWIN32_AVAILABLE = False
-
 
 APP_NAME = "EMR_Sequencer"
 
@@ -107,23 +112,23 @@ class SnippingTool:
         self.v_left, self.v_top = 0, 0
 
         # For multi-monitor support on Windows
-        if GET_TICK_COUNT_AVAILABLE: # This implies ctypes is available
+        if GET_TICK_COUNT_AVAILABLE:  # This implies ctypes is available
             try:
                 SM_XVIRTUALSCREEN = 76
                 SM_YVIRTUALSCREEN = 77
                 SM_CXVIRTUALSCREEN = 78
                 SM_CYVIRTUALSCREEN = 79
-                
+
                 self.v_left = ctypes.windll.user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
                 self.v_top = ctypes.windll.user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
                 v_width = ctypes.windll.user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
                 v_height = ctypes.windll.user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                
+
                 self.snip_window.geometry(f"{v_width}x{v_height}+{self.v_left}+{self.v_top}")
                 self.is_multi_monitor = True
             except Exception:
                 self.is_multi_monitor = False
-        
+
         if not self.is_multi_monitor:
             # Fallback for non-Windows or if ctypes fails
             screen_width = root.winfo_screenwidth()
@@ -186,7 +191,7 @@ class SnippingTool:
         except Exception as e:
             messagebox.showerror("캡쳐 오류", f"화면을 캡쳐하는 중 오류가 발생했습니다:\n{e}")
             self.result_img = None
-        
+
         self.snip_window.destroy()
 
     def cancel(self):
@@ -216,12 +221,12 @@ class ClickPointSelector:
 
         max_w = self.win.winfo_screenwidth() * 0.8
         max_h = self.win.winfo_screenheight() * 0.8
-        
+
         img_w, img_h = self.pil_image.size
-        
+
         win_w = min(img_w + 40, max_w)
         win_h = min(img_h + 160, max_h)
-        
+
         self.win.geometry(f"{int(win_w)}x{int(win_h)}")
         center_window(self.win)
 
@@ -239,7 +244,7 @@ class ClickPointSelector:
 
         h_scroll.pack(side="bottom", fill="x")
         v_scroll.pack(side="right", fill="y")
-        
+
         self.canvas.create_image(0, 0, anchor="nw", image=self.tk_image)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
@@ -248,7 +253,7 @@ class ClickPointSelector:
 
         info_label = tk.Label(self.win, text="이미지에서 클릭할 지점을 선택하세요.", fg="blue")
         info_label.pack(pady=5)
-        
+
         self.double_click_var = tk.BooleanVar(value=(current_click_type == "double"))
         double_click_cb = ttk.Checkbutton(self.win, text="더블 클릭", variable=self.double_click_var)
         double_click_cb.pack(pady=5)
@@ -285,7 +290,7 @@ class KeyRecorder:
         self.win.grab_set()
         center_window(self.win)
 
-        lbl = ttk.Label(self.win, text="[기록 시작] 버튼을 누른 후 키보드를 입력하세요.\n입력하는 키들이 하나의 작업 시퀀스로 저장됩니다.", 
+        lbl = ttk.Label(self.win, text="[기록 시작] 버튼을 누른 후 키보드를 입력하세요.\n입력하는 키들이 하나의 작업 시퀀스로 저장됩니다.",
                         justify=tk.CENTER, font=("맑은 고딕", 10))
         lbl.pack(pady=15)
 
@@ -301,11 +306,12 @@ class KeyRecorder:
         self.clear_btn = ttk.Button(btn_frame, text="초기화", command=self.clear_record, width=10)
         self.clear_btn.pack(side=tk.LEFT, padx=10)
 
-        self.save_btn = ttk.Button(self.win, text="작업 리스트에 추가 (종료)", command=self.save_and_close, style="Accent.TButton")
+        self.save_btn = ttk.Button(self.win, text="작업 리스트에 추가 (종료)", command=self.save_and_close,
+                                   style="Accent.TButton")
         self.save_btn.pack(pady=20, ipadx=20, ipady=5)
 
         self.win.bind("<Key>", self.on_key_event)
-        
+
     def toggle_recording(self):
         if not self.is_recording:
             self.is_recording = True
@@ -314,17 +320,17 @@ class KeyRecorder:
         else:
             self.is_recording = False
             self.start_btn.config(text="기록 시작")
-            
+
     def clear_record(self):
         self.recorded_actions = []
         self.update_display()
-        
+
     def on_key_event(self, event):
         if not self.is_recording:
             return
-        
+
         key_name = event.keysym.lower()
-        
+
         # PyAutoGUI 호환 키 매핑
         mapping = {
             "return": "enter",
@@ -343,14 +349,14 @@ class KeyRecorder:
             "delete": "delete",
             "caps_lock": "capslock"
         }
-        
+
         if key_name in mapping:
             final_key = mapping[key_name]
         elif len(event.char) == 1:
             final_key = event.char
         else:
             final_key = key_name
-            
+
         # 모디파이어 키 단독 입력은 무시 (조합키는 추후 확장 가능)
         if final_key in ['shift_l', 'shift_r', 'control_l', 'control_r', 'alt_l', 'alt_r']:
             return "break"
@@ -376,24 +382,24 @@ class DateSettingDialog:
     def __init__(self, parent, initial_offset=0, initial_format="%Y%m%d"):
         self.parent = parent
         self.result = None
-        
+
         self.win = tk.Toplevel(parent)
         self.win.title("날짜 입력 설정")
         self.win.geometry("400x520")
         self.win.transient(parent)
         self.win.grab_set()
         center_window(self.win)
-        
+
         today = datetime.now().date()
         target_date = today + timedelta(days=initial_offset)
-        
+
         main_frame = ttk.Frame(self.win, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         ttk.Label(main_frame, text="1. 날짜 선택 (달력)", font=("맑은 고딕", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        
+
         if TKCALENDAR_AVAILABLE:
-            self.cal = Calendar(main_frame, selectmode='day', 
+            self.cal = Calendar(main_frame, selectmode='day',
                                 year=target_date.year, month=target_date.month, day=target_date.day,
                                 date_pattern='yyyy-mm-dd')
             self.cal.pack(fill="x", pady=5)
@@ -401,39 +407,42 @@ class DateSettingDialog:
             self.cal.selection_set(target_date)
             self.cal.bind("<<CalendarSelected>>", self.on_date_selected)
         else:
-            err_lbl = ttk.Label(main_frame, text="tkcalendar 라이브러리가 설치되어 있지 않습니다.\n달력 기능을 사용하려면 아래 명령어를 실행하세요:\npip install tkcalendar", 
+            err_lbl = ttk.Label(main_frame,
+                                text="tkcalendar 라이브러리가 설치되어 있지 않습니다.\n달력 기능을 사용하려면 아래 명령어를 실행하세요:\npip install tkcalendar",
                                 foreground="red", justify=tk.CENTER)
             err_lbl.pack(pady=20)
             self.cal = None
 
         ttk.Label(main_frame, text="2. 기준일(오늘)로부터 차이 (일)", font=("맑은 고딕", 10, "bold")).pack(anchor="w", pady=(15, 5))
-        
+
         offset_frame = ttk.Frame(main_frame)
         offset_frame.pack(fill="x")
-        
+
         self.offset_var = tk.IntVar(value=initial_offset)
         self.offset_spin = tk.Spinbox(offset_frame, from_=-3650, to=3650, textvariable=self.offset_var, width=10)
         self.offset_spin.pack(side=tk.LEFT, padx=5)
-        
+
         # trace를 사용하여 값이 변경될 때마다 달력과 라벨 업데이트
         self.offset_var.trace_add("write", lambda *args: self.update_from_offset())
-        
-        self.calc_label = ttk.Label(offset_frame, text=f"(계산된 날짜: {target_date.strftime('%Y-%m-%d')})", foreground="blue")
+
+        self.calc_label = ttk.Label(offset_frame, text=f"(계산된 날짜: {target_date.strftime('%Y-%m-%d')})",
+                                    foreground="blue")
         self.calc_label.pack(side=tk.LEFT, padx=10)
-        
+
         ttk.Label(main_frame, text="3. 날짜 출력 형식", font=("맑은 고딕", 10, "bold")).pack(anchor="w", pady=(15, 5))
-        
+
         self.format_var = tk.StringVar(value=initial_format)
         formats = ["%Y%m%d", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y년 %m월 %d일"]
         self.format_combo = ttk.Combobox(main_frame, values=formats, textvariable=self.format_var)
         self.format_combo.pack(fill="x", pady=5)
-        
+
         ttk.Label(main_frame, text="예: %Y%m%d -> 20231027", font=("맑은 고딕", 8), foreground="gray").pack(anchor="w")
 
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=(30, 0))
-        
-        ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton", width=15).pack(side=tk.LEFT, padx=10)
+
+        ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton", width=15).pack(side=tk.LEFT,
+                                                                                                    padx=10)
         ttk.Button(btn_frame, text="취소", command=self.win.destroy, width=15).pack(side=tk.LEFT, padx=10)
 
     def on_date_selected(self, event=None):
@@ -442,11 +451,11 @@ class DateSettingDialog:
             selected_date = self.cal.selection_get()
             today = datetime.now().date()
             diff = (selected_date - today).days
-            
+
             # 무한 루프 방지를 위해 값 확인 후 업데이트
             if self.offset_var.get() != diff:
                 self.offset_var.set(diff)
-            
+
             self.calc_label.config(text=f"(계산된 날짜: {selected_date.strftime('%Y-%m-%d')})")
         except:
             pass
@@ -456,7 +465,7 @@ class DateSettingDialog:
             val = self.offset_var.get()
             target_date = datetime.now().date() + timedelta(days=val)
             self.calc_label.config(text=f"(계산된 날짜: {target_date.strftime('%Y-%m-%d')})")
-            
+
             if self.cal:
                 # 현재 달력 선택과 다를 때만 업데이트
                 current_cal_date = self.cal.selection_get()
@@ -475,12 +484,13 @@ class DateSettingDialog:
         except:
             messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
 
+
 class FailureActionDialog:
     def __init__(self, parent, action_list, current_action):
         self.parent = parent
         self.result = None
         self.action_list = action_list
-        
+
         self.win = tk.Toplevel(parent)
         self.win.title("실패 시 동작 설정")
         self.win.geometry("400x300")
@@ -492,7 +502,7 @@ class FailureActionDialog:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         on_failure = current_action.get("on_failure", {})
-        
+
         self.enabled_var = tk.BooleanVar(value=on_failure.get("enabled", False))
         self.retries_var = tk.IntVar(value=on_failure.get("retries", 3))
         self.goto_var = tk.StringVar(value=on_failure.get("goto", ""))
@@ -507,17 +517,18 @@ class FailureActionDialog:
         goto_frame = ttk.Frame(main_frame)
         goto_frame.pack(fill="x", pady=5)
         ttk.Label(goto_frame, text="이동할 단계:").pack(side=tk.LEFT, padx=(0, 10))
-        
+
         # 단계 목록 생성
-        step_options = [f"{i+1}: {act.get('alias') or act['type']}" for i, act in enumerate(action_list)]
+        step_options = [f"{i + 1}: {act.get('alias') or act['type']}" for i, act in enumerate(action_list)]
         self.goto_combo = ttk.Combobox(goto_frame, textvariable=self.goto_var, values=step_options, width=30)
         if on_failure.get("goto"):
-            self.goto_combo.set(f"{on_failure['goto']}: {action_list[on_failure['goto']-1].get('alias') or action_list[on_failure['goto']-1]['type']}")
+            self.goto_combo.set(
+                f"{on_failure['goto']}: {action_list[on_failure['goto'] - 1].get('alias') or action_list[on_failure['goto'] - 1]['type']}")
         self.goto_combo.pack(side=tk.LEFT)
 
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=(30, 0))
-        
+
         ttk.Button(btn_frame, text="확인", command=self.on_ok, style="Accent.TButton").pack(side=tk.LEFT, padx=10)
         ttk.Button(btn_frame, text="설정 초기화", command=self.on_clear).pack(side=tk.LEFT, padx=10)
         ttk.Button(btn_frame, text="취소", command=self.win.destroy).pack(side=tk.LEFT, padx=10)
@@ -543,11 +554,12 @@ class FailureActionDialog:
         self.result = {}
         self.win.destroy()
 
+
 class EMRSequenceApp:
     def __init__(self, root):
         self.root = root
         self.root.title("EMR 자동화 시퀀서")
-        
+
         # 스타일 설정
         style = ttk.Style()
         style.configure("TButton", font=("맑은 고딕", 9))
@@ -557,15 +569,14 @@ class EMRSequenceApp:
         style.configure("TCombobox", font=("맑은 고딕", 9))
         style.configure("Treeview.Heading", font=("맑은 고딕", 10, "bold"))
         style.configure("Accent.TButton", font=("맑은 고딕", 9, "bold"))
-        
+
         # 왼쪽 정렬 버튼 스타일 (패딩 추가하여 들여쓰기 구현)
         style.configure("Left.TButton", font=("맑은 고딕", 9), anchor="w", padding=(10, 0, 0, 0))
-        
+
         # Treeview 비활성화 상태 색상 문제 수정을 위한 스타일 맵
         style.map('Treeview',
-          foreground=self._fixed_map(style, 'foreground'),
-          background=self._fixed_map(style, 'background'))
-
+                  foreground=self._fixed_map(style, 'foreground'),
+                  background=self._fixed_map(style, 'background'))
 
         self.is_running = False
         self.tray_icon = None
@@ -573,14 +584,18 @@ class EMRSequenceApp:
         self.processes = {}
         self.current_process = ""
         self.default_delay = 2.0
+        self.delay_var = tk.DoubleVar(value=2.0)
         self.schedules = {}
         self.tray_enabled = tk.BooleanVar(value=False)
         self.autostart_enabled = tk.BooleanVar(value=False)
         self.confidence_var = tk.DoubleVar(value=0.8)
+        self.pre_type_delay_var = tk.DoubleVar(value=0.0)
+        self.char_interval_var = tk.DoubleVar(value=0.0)
+        self.post_type_delay_var = tk.DoubleVar(value=0.0)
 
         self.last_run_date = {}
         self.retry_counts = {}
-        
+
         self.schedule_type_var = tk.StringVar(value="time")
         self.hour_var = tk.StringVar(value="09")
         self.minute_var = tk.StringVar(value="00")
@@ -591,13 +606,13 @@ class EMRSequenceApp:
         self.redo_stack = []
 
         self.load_config()
-        
+
         if self.window_geometry:
             self.root.geometry(self.window_geometry)
         else:
             self.root.geometry("900x750")
             center_window(self.root)
-        
+
         if self.window_state == 'zoomed':
             self.root.state('zoomed')
 
@@ -634,7 +649,7 @@ class EMRSequenceApp:
             return ""
         abs_path = os.path.abspath(path)
         app_abs_path = os.path.abspath(application_path)
-        
+
         # Windows에서 드라이브가 다른 경우 relpath가 오류를 일으키므로 절대 경로 반환
         if os.name == 'nt':
             if os.path.splitdrive(abs_path)[0].lower() != os.path.splitdrive(app_abs_path)[0].lower():
@@ -645,9 +660,25 @@ class EMRSequenceApp:
             try:
                 return os.path.relpath(abs_path, app_abs_path)
             except ValueError:
-                return abs_path # 예외 발생 시 절대 경로로 대체
-        
+                return abs_path  # 예외 발생 시 절대 경로로 대체
+
         return abs_path
+
+    # --- 다중 모니터 대응 전체 캡처 및 오프셋 계산 헬퍼 함수 추가 ---
+    def get_full_screenshot_and_offset(self):
+        v_left, v_top = 0, 0
+        if GET_TICK_COUNT_AVAILABLE:
+            try:
+                import ctypes
+                SM_XVIRTUALSCREEN = 76
+                SM_YVIRTUALSCREEN = 77
+                v_left = ctypes.windll.user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+                v_top = ctypes.windll.user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+            except Exception:
+                pass
+
+        screenshot = ImageGrab.grab(all_screens=True)
+        return screenshot, v_left, v_top
 
     def create_widgets(self):
         """UI 구성"""
@@ -666,40 +697,46 @@ class EMRSequenceApp:
         ttk.Button(top_frame, text="새로 만들기", command=self.add_process).grid(row=0, column=3, padx=2, pady=2)
         ttk.Button(top_frame, text="이름 변경", command=self.rename_process).grid(row=0, column=4, padx=2, pady=2)
         ttk.Button(top_frame, text="삭제", command=self.delete_process).grid(row=0, column=5, padx=2, pady=2)
-        
-        ttk.Button(top_frame, text="환경설정", command=self.open_settings_window).grid(row=0, column=6, padx=(10, 2), pady=2, sticky="e")
 
+        ttk.Button(top_frame, text="환경설정", command=self.open_settings_window).grid(row=0, column=6, padx=(10, 2),
+                                                                                   pady=2, sticky="e")
 
         schedule_frame = ttk.LabelFrame(self.root, text="프로세스 실행 예약", padding=(10, 5))
         schedule_frame.pack(fill=tk.X, padx=10, pady=5)
         schedule_frame.columnconfigure(1, weight=1)
 
-        self.time_radio = ttk.Radiobutton(schedule_frame, text="특정 시간 (HH:MM)", variable=self.schedule_type_var, value="time", command=self.toggle_schedule_widgets)
+        self.time_radio = ttk.Radiobutton(schedule_frame, text="특정 시간 (HH:MM)", variable=self.schedule_type_var,
+                                          value="time", command=self.toggle_schedule_widgets)
         self.time_radio.grid(row=0, column=0, sticky="w", padx=5)
 
-        self.boot_radio = ttk.Radiobutton(schedule_frame, text="부팅 후 (MM:SS)", variable=self.schedule_type_var, value="boot", command=self.toggle_schedule_widgets)
+        self.boot_radio = ttk.Radiobutton(schedule_frame, text="부팅 후 (MM:SS)", variable=self.schedule_type_var,
+                                          value="boot", command=self.toggle_schedule_widgets)
         self.boot_radio.grid(row=1, column=0, sticky="w", padx=5)
         if not GET_TICK_COUNT_AVAILABLE:
             self.boot_radio.config(state=tk.DISABLED)
 
         self.time_input_frame = ttk.Frame(schedule_frame)
         self.time_input_frame.grid(row=0, column=1, sticky="w")
-        self.hour_spin = tk.Spinbox(self.time_input_frame, from_=0, to=23, textvariable=self.hour_var, width=3, format="%02.0f")
+        self.hour_spin = tk.Spinbox(self.time_input_frame, from_=0, to=23, textvariable=self.hour_var, width=3,
+                                    format="%02.0f")
         self.hour_spin.pack(side=tk.LEFT)
         ttk.Label(self.time_input_frame, text=":").pack(side=tk.LEFT, padx=2)
-        self.minute_spin = tk.Spinbox(self.time_input_frame, from_=0, to=59, textvariable=self.minute_var, width=3, format="%02.0f")
+        self.minute_spin = tk.Spinbox(self.time_input_frame, from_=0, to=59, textvariable=self.minute_var, width=3,
+                                      format="%02.0f")
         self.minute_spin.pack(side=tk.LEFT)
 
         self.boot_input_frame = ttk.Frame(schedule_frame)
         self.boot_input_frame.grid(row=1, column=1, sticky="w")
-        self.boot_minute_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_minute_var, width=3, format="%02.0f")
+        self.boot_minute_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_minute_var,
+                                           width=3, format="%02.0f")
         self.boot_minute_spin.pack(side=tk.LEFT)
         ttk.Label(self.boot_input_frame, text=":").pack(side=tk.LEFT, padx=2)
-        self.boot_second_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_second_var, width=3, format="%02.0f")
+        self.boot_second_spin = tk.Spinbox(self.boot_input_frame, from_=0, to=59, textvariable=self.boot_second_var,
+                                           width=3, format="%02.0f")
         self.boot_second_spin.pack(side=tk.LEFT)
 
         btn_frame = ttk.Frame(schedule_frame)
-        btn_frame.grid(row=0, column=2, rowspan=2, padx=(10,0))
+        btn_frame.grid(row=0, column=2, rowspan=2, padx=(10, 0))
         ttk.Button(btn_frame, text="예약 저장", command=self.save_schedule, style="Accent.TButton").pack(fill=tk.X, pady=2)
         ttk.Button(btn_frame, text="예약 취소", command=self.cancel_schedule).pack(fill=tk.X, pady=2)
 
@@ -713,7 +750,6 @@ class EMRSequenceApp:
         middle_frame.rowconfigure(0, weight=1)
         middle_frame.columnconfigure(0, weight=1)
 
-
         left_frame = ttk.Frame(middle_frame)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -725,20 +761,20 @@ class EMRSequenceApp:
         self.tree.heading("내용", text="내용")
         self.tree.heading("실패 시 이동", text="실패 시 이동", anchor="center")
         self.tree.heading("재시도", text="재시도", anchor="center")
-        
+
         self.tree.column("#", width=40, anchor="center", stretch=False)
         self.tree.column("활성", width=50, anchor="center", stretch=False)
         self.tree.column("구분", width=120, anchor="center", stretch=False)
         self.tree.column("내용", width=300, stretch=True)
         self.tree.column("실패 시 이동", width=100, anchor="center", stretch=False)
         self.tree.column("재시도", width=60, anchor="center", stretch=False)
-        
+
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill="y")
-        
+
         # 이벤트 바인딩
         self.tree.bind("<Button-1>", self.on_tree_click)
         if sys.platform == "darwin":
@@ -757,38 +793,43 @@ class EMRSequenceApp:
         # 버튼 가로 사이즈 조정 (기존 25에서 22로)
         btn_width = 22
 
-        ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 비밀번호 입력", command=self.add_password, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 날짜 입력", command=self.add_date_input, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 이미지 클릭", command=self.add_click, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 클릭 & 텍스트", command=self.add_type, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 비밀번호 입력", command=self.add_password, style="Left.TButton",
+                   width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 키 입력(연속 기록)", command=self.add_key, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 날짜 입력", command=self.add_date_input, style="Left.TButton",
+                   width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 단순 대기(초)", command=self.add_wait, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 이미지 확인(대기)", command=self.add_wait_image, style="Left.TButton",
+                   width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 파일 실행", command=self.add_exec_file, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="+ 경로 열기", command=self.add_open_path, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
 
-        ttk.Button(right_frame, text="실패 시 동작 설정", command=self.set_failure_action, style="Left.TButton", width=btn_width).pack(pady=(15, 3), fill=tk.X)
-        ttk.Button(right_frame, text="작업 이름 변경", command=self.rename_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="작업(내용) 수정", command=self.edit_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
-        ttk.Button(right_frame, text="작업 삭제", command=self.delete_action, style="Left.TButton", width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="실패 시 동작 설정", command=self.set_failure_action, style="Left.TButton",
+                   width=btn_width).pack(pady=(15, 3), fill=tk.X)
+        ttk.Button(right_frame, text="작업 이름 변경", command=self.rename_action, style="Left.TButton",
+                   width=btn_width).pack(pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="작업(내용) 수정", command=self.edit_action, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
+        ttk.Button(right_frame, text="작업 삭제", command=self.delete_action, style="Left.TButton", width=btn_width).pack(
+            pady=3, fill=tk.X)
 
-        self.undo_btn = ttk.Button(right_frame, text="↶ Undo", command=self.undo_action, style="Left.TButton", width=btn_width)
-        self.undo_btn.pack(pady=(10,3), fill=tk.X)
-        self.redo_btn = ttk.Button(right_frame, text="↷ Redo", command=self.redo_action, style="Left.TButton", width=btn_width)
+        self.undo_btn = ttk.Button(right_frame, text="↶ Undo", command=self.undo_action, style="Left.TButton",
+                                   width=btn_width)
+        self.undo_btn.pack(pady=(10, 3), fill=tk.X)
+        self.redo_btn = ttk.Button(right_frame, text="↷ Redo", command=self.redo_action, style="Left.TButton",
+                                   width=btn_width)
         self.redo_btn.pack(pady=3, fill=tk.X)
 
         bottom_frame = ttk.Frame(self.root)
         bottom_frame.pack(pady=10, fill=tk.X, padx=10)
-
-        delay_frame = ttk.Frame(bottom_frame)
-        delay_frame.pack(side=tk.TOP, pady=5)
-        ttk.Label(delay_frame, text="동작 간 기본 대기시간(초):").pack(side=tk.LEFT)
-
-        self.delay_var = tk.DoubleVar(value=self.default_delay)
-        delay_spin = tk.Spinbox(delay_frame, from_=0.0, to=10.0, increment=0.5, textvariable=self.delay_var, width=5,
-                                command=self.save_config)
-        delay_spin.pack(side=tk.LEFT, padx=5)
-        delay_spin.bind("<KeyRelease>", lambda e: self.save_config())
 
         ctrl_frame = ttk.Frame(bottom_frame)
         ctrl_frame.pack(side=tk.TOP, pady=5)
@@ -800,7 +841,7 @@ class EMRSequenceApp:
         self.start_from_btn.grid(row=0, column=1, padx=5)
 
         self.stop_btn = ttk.Button(ctrl_frame, text="■ 정지", state=tk.DISABLED,
-                                  command=self.stop_rpa)
+                                   command=self.stop_rpa)
         self.stop_btn.grid(row=0, column=2, padx=5)
 
     def save_state_for_undo(self):
@@ -870,12 +911,12 @@ class EMRSequenceApp:
         current_tags = list(self.tree.item(item_id, 'tags'))
         if 'disabled' in current_tags:
             current_tags.remove('disabled')
-        
+
         if not act["enabled"]:
             current_tags.append('disabled')
-        
+
         self.tree.item(item_id, tags=tuple(current_tags))
-        
+
         self.tree.selection_set(item_id)
         self.tree.focus(item_id)
 
@@ -884,7 +925,7 @@ class EMRSequenceApp:
         if not selected_item:
             messagebox.showwarning("선택 오류", "시작할 작업을 리스트에서 선택해주세요.")
             return
-        
+
         idx = self.tree.index(selected_item[0])
         self.start_rpa(start_index=idx)
 
@@ -903,11 +944,11 @@ class EMRSequenceApp:
     def open_settings_window(self):
         settings_win = tk.Toplevel(self.root)
         settings_win.title("환경설정")
-        settings_win.geometry("400x300")
+        settings_win.geometry("400x500")
         settings_win.resizable(False, False)
         settings_win.transient(self.root)
         settings_win.grab_set()
-        
+
         center_window(settings_win)
 
         frame = ttk.Frame(settings_win, padding=10)
@@ -917,18 +958,27 @@ class EMRSequenceApp:
         tray_cb.pack(anchor="w", pady=5)
 
         autostart_cb = ttk.Checkbutton(frame, text="윈도우 부팅 시 자동 실행", variable=self.autostart_enabled,
-                                      command=self.toggle_autostart)
+                                       command=self.toggle_autostart)
         autostart_cb.pack(anchor="w", pady=5)
         if not WINREG_AVAILABLE:
             autostart_cb.config(state=tk.DISABLED)
 
+        delay_frame = ttk.Frame(frame)
+        delay_frame.pack(fill=tk.X, pady=(10, 0))
+        ttk.Label(delay_frame, text="동작 간 기본 대기시간(초):").pack(side=tk.LEFT)
+        delay_spin = tk.Spinbox(delay_frame, from_=0.0, to=10.0, increment=0.5, textvariable=self.delay_var, width=5,
+                                command=self.save_config)
+        delay_spin.pack(side=tk.RIGHT)
+        delay_spin.bind("<KeyRelease>", lambda e: self.save_config())
+
         confidence_frame = ttk.Frame(frame)
         confidence_frame.pack(fill=tk.X, pady=(10, 0))
-        
+
         confidence_label = ttk.Label(confidence_frame, text=f"이미지 인식 정확도: {self.confidence_var.get():.2f}")
         confidence_label.pack(anchor="w")
-        
-        confidence_scale = tk.Scale(confidence_frame, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.confidence_var,
+
+        confidence_scale = tk.Scale(confidence_frame, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL,
+                                    variable=self.confidence_var,
                                     command=lambda val: confidence_label.config(text=f"이미지 인식 정확도: {float(val):.2f}"))
         confidence_scale.pack(fill=tk.X)
         confidence_scale.bind("<ButtonRelease-1>", lambda e: self.save_config())
@@ -936,6 +986,35 @@ class EMRSequenceApp:
         help_text = "Tip: 이미지를 잘 찾지 못하면 이 값을 낮춰보세요. (예: 0.7)"
         help_label = ttk.Label(confidence_frame, text=help_text, foreground="gray", font=("맑은 고딕", 8))
         help_label.pack(anchor="e")
+
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
+
+        typing_frame = ttk.LabelFrame(frame, text="타이핑 속도 설정 (초)")
+        typing_frame.pack(fill=tk.X, pady=5)
+
+        pre_delay_frame = ttk.Frame(typing_frame)
+        pre_delay_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(pre_delay_frame, text="클릭 후 입력 전 대기:").pack(side=tk.LEFT)
+        pre_delay_spin = tk.Spinbox(pre_delay_frame, from_=0.0, to=5.0, increment=0.1,
+                                    textvariable=self.pre_type_delay_var, width=5, command=self.save_config)
+        pre_delay_spin.pack(side=tk.RIGHT)
+        pre_delay_spin.bind("<KeyRelease>", lambda e: self.save_config())
+
+        char_interval_frame = ttk.Frame(typing_frame)
+        char_interval_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(char_interval_frame, text="글자 입력 간격:").pack(side=tk.LEFT)
+        char_interval_spin = tk.Spinbox(char_interval_frame, from_=0.0, to=1.0, increment=0.01,
+                                        textvariable=self.char_interval_var, width=5, command=self.save_config)
+        char_interval_spin.pack(side=tk.RIGHT)
+        char_interval_spin.bind("<KeyRelease>", lambda e: self.save_config())
+
+        post_delay_frame = ttk.Frame(typing_frame)
+        post_delay_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(post_delay_frame, text="입력 후 다음 동작 전 대기:").pack(side=tk.LEFT)
+        post_delay_spin = tk.Spinbox(post_delay_frame, from_=0.0, to=5.0, increment=0.1,
+                                     textvariable=self.post_type_delay_var, width=5, command=self.save_config)
+        post_delay_spin.pack(side=tk.RIGHT)
+        post_delay_spin.bind("<KeyRelease>", lambda e: self.save_config())
 
         ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
 
@@ -965,13 +1044,13 @@ class EMRSequenceApp:
                     all_images_in_folder.add(os.path.normpath(os.path.join(root, name)))
 
         unused_images = all_images_in_folder - used_images
-        
+
         if not unused_images:
             messagebox.showinfo("알림", "사용하지 않는 이미지가 없습니다.", parent=self.root)
             return
 
         msg = f"{len(unused_images)}개의 사용하지 않는 이미지를 찾았습니다. 삭제하시겠습니까?\n\n"
-        msg += "\n".join([os.path.basename(p) for p in list(unused_images)[:10]]) # 최대 10개만 미리보기
+        msg += "\n".join([os.path.basename(p) for p in list(unused_images)[:10]])  # 최대 10개만 미리보기
         if len(unused_images) > 10:
             msg += "\n..."
 
@@ -984,11 +1063,11 @@ class EMRSequenceApp:
                     deleted_count += 1
                 except OSError as e:
                     error_files.append(os.path.basename(img_path))
-            
+
             final_msg = f"{deleted_count}개의 이미지를 삭제했습니다."
             if error_files:
                 final_msg += f"\n\n다음 파일들은 삭제하지 못했습니다:\n" + "\n".join(error_files)
-            
+
             messagebox.showinfo("완료", final_msg, parent=self.root)
 
     def on_process_change(self, event=None):
@@ -1008,7 +1087,8 @@ class EMRSequenceApp:
                     hour, minute = schedule_value.split(":")
                     self.hour_var.set(f"{int(hour):02d}")
                     self.minute_var.set(f"{int(minute):02d}")
-                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (매일 {schedule_value})", foreground="green")
+                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (매일 {schedule_value})",
+                                             foreground="green")
                 except (ValueError, TypeError):
                     self.status_label.config(text="예약 없음", foreground="blue")
             elif schedule_type == "boot":
@@ -1016,18 +1096,19 @@ class EMRSequenceApp:
                     minute, second = schedule_value.split(":")
                     self.boot_minute_var.set(f"{int(minute):02d}")
                     self.boot_second_var.set(f"{int(second):02d}")
-                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (부팅 후 {schedule_value})", foreground="purple")
+                    self.status_label.config(text=f"'{self.current_process}' 예약됨 (부팅 후 {schedule_value})",
+                                             foreground="purple")
                 except (ValueError, TypeError):
-                     self.status_label.config(text="예약 없음", foreground="blue")
+                    self.status_label.config(text="예약 없음", foreground="blue")
         else:
             self.schedule_type_var.set("time")
             self.status_label.config(text="예약 없음", foreground="blue")
-        
+
         self.toggle_schedule_widgets()
 
     def save_schedule(self):
         schedule_type = self.schedule_type_var.get()
-        
+
         if schedule_type == "time":
             try:
                 hour = int(self.hour_var.get())
@@ -1133,18 +1214,18 @@ class EMRSequenceApp:
             if snipper.result_img:
                 process_capture_dir = os.path.join(application_path, "captures", self.current_process)
                 os.makedirs(process_capture_dir, exist_ok=True)
-                
+
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 file_path = os.path.join(process_capture_dir, f"cap_{timestamp}.png")
                 snipper.result_img.save(file_path)
 
         elif choice is False:
             initial_dir = os.path.join(application_path, "captures")
-            file_path = filedialog.askopenfilename(title="이미지 선택", 
-                                                 initialdir=initial_dir,
-                                                 filetypes=[("Image files", "*.png *.jpg")])
+            file_path = filedialog.askopenfilename(title="이미지 선택",
+                                                   initialdir=initial_dir,
+                                                   filetypes=[("Image files", "*.png *.jpg")])
 
-        else: # Cancel
+        else:  # Cancel
             if is_edit and current_action:
                 return current_action.get("image"), current_action.get("click_pos"), current_action.get("click_type")
             return None, None, None
@@ -1156,7 +1237,7 @@ class EMRSequenceApp:
             return file_path, click_pos, click_type
 
         return None, None, None
-    
+
     def get_image_path_for_wait(self, is_edit=False, current_action=None):
         file_path = None
         if is_edit:
@@ -1176,7 +1257,7 @@ class EMRSequenceApp:
             if snipper.result_img:
                 process_capture_dir = os.path.join(application_path, "captures", self.current_process)
                 os.makedirs(process_capture_dir, exist_ok=True)
-                
+
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 file_path = os.path.join(process_capture_dir, f"cap_{timestamp}.png")
                 snipper.result_img.save(file_path)
@@ -1184,10 +1265,10 @@ class EMRSequenceApp:
 
         elif choice is False:
             initial_dir = os.path.join(application_path, "captures")
-            return filedialog.askopenfilename(title="이미지 선택", 
-                                            initialdir=initial_dir,
-                                            filetypes=[("Image files", "*.png *.jpg")])
-        
+            return filedialog.askopenfilename(title="이미지 선택",
+                                              initialdir=initial_dir,
+                                              filetypes=[("Image files", "*.png *.jpg")])
+
         else:
             if is_edit and current_action:
                 return current_action.get("image")
@@ -1198,7 +1279,8 @@ class EMRSequenceApp:
         self.save_state_for_undo()
         file_path, click_pos, click_type = self.get_image_and_click_pos()
         if file_path:
-            action = {"type": "click", "image": self._get_relative_path(file_path), "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+            action = {"type": "click", "image": self._get_relative_path(file_path), "alias": "", "click_pos": click_pos,
+                      "click_type": click_type, "enabled": True}
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
@@ -1209,7 +1291,8 @@ class EMRSequenceApp:
         if file_path:
             text = simpledialog.askstring("텍스트 입력", "입력할 텍스트를 적어주세요:", parent=self.root)
             if text is not None:
-                action = {"type": "type", "image": self._get_relative_path(file_path), "text": text, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+                action = {"type": "type", "image": self._get_relative_path(file_path), "text": text, "alias": "",
+                          "click_pos": click_pos, "click_type": click_type, "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1220,7 +1303,8 @@ class EMRSequenceApp:
         if file_path:
             password = simpledialog.askstring("비밀번호 입력", "입력할 비밀번호를 적어주세요:", show='*', parent=self.root)
             if password is not None:
-                action = {"type": "password", "image": self._get_relative_path(file_path), "text": password, "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
+                action = {"type": "password", "image": self._get_relative_path(file_path), "text": password,
+                          "alias": "", "click_pos": click_pos, "click_type": click_type, "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1232,7 +1316,8 @@ class EMRSequenceApp:
             timeout = simpledialog.askfloat("타임아웃 설정", "이미지가 나타날 때까지 기다릴 최대 시간(초)을 입력하세요\n(예: 10초 이내에 안 나타나면 오류 처리):",
                                             initialvalue=10.0, parent=self.root)
             if timeout is not None:
-                action = {"type": "wait_image", "image": self._get_relative_path(file_path), "timeout": timeout, "alias": "", "enabled": True}
+                action = {"type": "wait_image", "image": self._get_relative_path(file_path), "timeout": timeout,
+                          "alias": "", "enabled": True}
                 self.processes[self.current_process].append(action)
                 self.update_treeview()
                 self.save_config()
@@ -1241,7 +1326,7 @@ class EMRSequenceApp:
         self.save_state_for_undo()
         recorder = KeyRecorder(self.root)
         self.root.wait_window(recorder.win)
-        
+
         if recorder.recorded_actions:
             action = {"type": "key", "keys": recorder.recorded_actions, "alias": "", "enabled": True}
             self.processes[self.current_process].append(action)
@@ -1276,7 +1361,7 @@ class EMRSequenceApp:
             self.processes[self.current_process].append(action)
             self.update_treeview()
             self.save_config()
-    
+
     def add_open_path(self):
         self.save_state_for_undo()
         dir_path = filedialog.askdirectory(title="열고 싶은 폴더 선택")
@@ -1326,11 +1411,13 @@ class EMRSequenceApp:
                 act["click_type"] = click_type
 
             if act["type"] == "type":
-                new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""), parent=self.root)
+                new_text = simpledialog.askstring("텍스트 수정", "새로운 텍스트를 입력하세요:", initialvalue=act.get("text", ""),
+                                                  parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
             elif act["type"] == "password":
-                new_text = simpledialog.askstring("비밀번호 수정", "새로운 비밀번호를 입력하세요:", show='*', initialvalue=act.get("text", ""), parent=self.root)
+                new_text = simpledialog.askstring("비밀번호 수정", "새로운 비밀번호를 입력하세요:", show='*',
+                                                  initialvalue=act.get("text", ""), parent=self.root)
                 if new_text is not None:
                     act["text"] = new_text
 
@@ -1345,14 +1432,15 @@ class EMRSequenceApp:
 
         elif act["type"] == "key":
             current_keys = ", ".join(act.get("keys", [act.get("key", "")]))
-            new_keys_str = simpledialog.askstring("키보드 입력 수정", "새로운 키들을 콤마(,)로 구분하여 입력하세요:", 
-                                                 initialvalue=current_keys, parent=self.root)
+            new_keys_str = simpledialog.askstring("키보드 입력 수정", "새로운 키들을 콤마(,)로 구분하여 입력하세요:",
+                                                  initialvalue=current_keys, parent=self.root)
             if new_keys_str:
                 act["keys"] = [k.strip().lower() for k in new_keys_str.split(",")]
                 if "key" in act: del act["key"]
 
         elif act["type"] == "date_input":
-            dialog = DateSettingDialog(self.root, initial_offset=act.get("offset", 0), initial_format=act.get("format", "%Y%m%d"))
+            dialog = DateSettingDialog(self.root, initial_offset=act.get("offset", 0),
+                                       initial_format=act.get("format", "%Y%m%d"))
             self.root.wait_window(dialog.win)
             if dialog.result:
                 offset, fmt = dialog.result
@@ -1360,16 +1448,17 @@ class EMRSequenceApp:
                 act["format"] = fmt
 
         elif act["type"] == "wait":
-            new_time = simpledialog.askfloat("대기 시간 수정", "새로운 대기 시간(초)을 입력하세요:", initialvalue=act.get("time", 1.0), parent=self.root)
+            new_time = simpledialog.askfloat("대기 시간 수정", "새로운 대기 시간(초)을 입력하세요:", initialvalue=act.get("time", 1.0),
+                                             parent=self.root)
             if new_time is not None:
                 act["time"] = new_time
-        
+
         elif act["type"] == "exec_file":
             initial_file = self._resolve_path(act.get("path"))
             new_path = filedialog.askopenfilename(title="실행할 파일 선택", initialfile=initial_file)
             if new_path:
                 act["path"] = self._get_relative_path(new_path)
-        
+
         elif act["type"] == "open_path":
             initial_dir = self._resolve_path(act.get("path"))
             new_path = filedialog.askdirectory(title="열고 싶은 폴더 선택", initialdir=initial_dir)
@@ -1425,11 +1514,11 @@ class EMRSequenceApp:
             return
 
         actions = self.processes[self.current_process]
-        
+
         for idx in selected_indices:
             item_to_move = actions.pop(idx)
             actions.insert(idx - 1, item_to_move)
-            
+
             # UI 상에서 아이템 이동
             item_id = self.tree.get_children()[idx]
             self.tree.move(item_id, '', idx - 1)
@@ -1438,12 +1527,11 @@ class EMRSequenceApp:
         self.renumber_treeview()
 
         # 선택 상태 복원
-        new_selection_ids = [self.tree.get_children()[i-1] for i in selected_indices]
+        new_selection_ids = [self.tree.get_children()[i - 1] for i in selected_indices]
         self.tree.selection_set(new_selection_ids)
         if new_selection_ids:
             self.tree.focus(new_selection_ids[0])
             self.tree.see(new_selection_ids[0])
-
 
     def move_down(self):
         self.save_state_for_undo()
@@ -1452,7 +1540,7 @@ class EMRSequenceApp:
             return
 
         selected_indices = sorted([self.tree.index(item) for item in selected_items], reverse=True)
-        
+
         if selected_indices[0] >= len(self.processes[self.current_process]) - 1:
             return
 
@@ -1470,7 +1558,7 @@ class EMRSequenceApp:
         self.renumber_treeview()
 
         # 선택 상태 복원
-        new_selection_ids = [self.tree.get_children()[i+1] for i in selected_indices]
+        new_selection_ids = [self.tree.get_children()[i + 1] for i in selected_indices]
         self.tree.selection_set(new_selection_ids)
         if new_selection_ids:
             self.tree.focus(new_selection_ids[-1])
@@ -1480,7 +1568,6 @@ class EMRSequenceApp:
         for i, item_id in enumerate(self.tree.get_children()):
             self.tree.set(item_id, column="#", value=i + 1)
 
-
     def update_treeview(self):
         # 현재 선택 및 스크롤 위치 저장
         selection = self.tree.selection()
@@ -1488,16 +1575,16 @@ class EMRSequenceApp:
 
         for i in self.tree.get_children():
             self.tree.delete(i)
-            
+
         current_actions = self.processes.get(self.current_process, [])
         for i, act in enumerate(current_actions):
             alias = act.get("alias", "")
             enabled = act.get("enabled", True)
             enabled_display = '☑' if enabled else '☐'
-            
+
             act_type_display = ""
             content_display = ""
-            
+
             path_in_act = act.get("image") or act.get("path")
 
             if act["type"] == "click":
@@ -1513,7 +1600,7 @@ class EMRSequenceApp:
                 content_display = alias if alias else f"{image_name} -> '***'"
             elif act["type"] == "key":
                 act_type_display = "[키보드]"
-                keys_display = " -> ".join(act.get("keys", [act.get("key", "")] ))
+                keys_display = " -> ".join(act.get("keys", [act.get("key", "")]))
                 content_display = alias if alias else keys_display
             elif act["type"] == "date_input":
                 act_type_display = "[날짜 입력]"
@@ -1548,8 +1635,10 @@ class EMRSequenceApp:
             self.tree.tag_configure('disabled', foreground='gray')
             self.tree.tag_configure('has_click_pos', foreground='purple')
 
-            self.tree.insert("", "end", values=(i + 1, enabled_display, act_type_display, content_display, goto_val, retries_val), tags=tuple(tags))
-        
+            self.tree.insert("", "end",
+                             values=(i + 1, enabled_display, act_type_display, content_display, goto_val, retries_val),
+                             tags=tuple(tags))
+
         # 선택 및 스크롤 위치 복원
         try:
             if selection:
@@ -1560,7 +1649,6 @@ class EMRSequenceApp:
             # 항목이 존재하지 않으면 선택을 복원하지 않음
             pass
         self.tree.yview_moveto(scroll_pos[0])
-
 
     def save_config(self):
         geometry = ""
@@ -1581,7 +1669,10 @@ class EMRSequenceApp:
                 "autostart_enabled": self.autostart_enabled.get(),
                 "window_geometry": geometry,
                 "window_state": self.root.state(),
-                "confidence": self.confidence_var.get()
+                "confidence": self.confidence_var.get(),
+                "pre_type_delay": self.pre_type_delay_var.get(),
+                "char_interval": self.char_interval_var.get(),
+                "post_type_delay": self.post_type_delay_var.get()
             },
             "schedules": self.schedules,
             "processes": processes_to_save
@@ -1609,11 +1700,15 @@ class EMRSequenceApp:
                     self.processes = data.get("processes", {"기본 프로세스": []})
                     settings = data.get("settings", {})
                     self.default_delay = settings.get("default_delay", 2.0)
+                    self.delay_var.set(self.default_delay)
                     self.tray_enabled.set(settings.get("tray_enabled", False))
                     self.window_geometry = settings.get("window_geometry", "")
                     self.window_state = settings.get("window_state", "normal")
                     self.confidence_var.set(settings.get("confidence", 0.8))
-                    
+                    self.pre_type_delay_var.set(settings.get("pre_type_delay", 0.0))
+                    self.char_interval_var.set(settings.get("char_interval", 0.0))
+                    self.post_type_delay_var.set(settings.get("post_type_delay", 0.0))
+
                     loaded_schedules = data.get("schedules", {})
                     for proc, val in loaded_schedules.items():
                         if isinstance(val, str):
@@ -1650,7 +1745,7 @@ class EMRSequenceApp:
         while True:
             now_time_str = datetime.now().strftime("%H:%M")
             now_date_str = datetime.now().strftime("%Y-%m-%d")
-            
+
             uptime_seconds = 0
             if GET_TICK_COUNT_AVAILABLE:
                 uptime_seconds = ctypes.windll.kernel32.GetTickCount64() / 1000
@@ -1674,7 +1769,7 @@ class EMRSequenceApp:
                             should_run = True
                     except (ValueError, TypeError):
                         continue
-                
+
                 if should_run:
                     self.last_run_date[proc] = run_key
                     self.root.after(0, self.execute_scheduled_task, proc)
@@ -1781,18 +1876,30 @@ class EMRSequenceApp:
         self.is_running = False
         self.status_label.config(text="정지 중...", foreground="orange")
 
+    # --- 클릭 동작(다중 모니터 좌표 보정 반영) 수정 ---
     def execute_click(self, image_path, click_pos, click_type="single"):
         try:
             resolved_path = self._resolve_path(image_path)
             img = Image.open(resolved_path)
-            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get(), grayscale=True)
+
+            # 전체 화면 캡처 및 오프셋 정보 획득
+            screenshot, v_left, v_top = self.get_full_screenshot_and_offset()
+
+            # pyautogui.locateOnScreen 대신 전체 스크린샷 위에서 locate
+            location = pyautogui.locate(img, screenshot, confidence=self.confidence_var.get(), grayscale=True)
+
             if location:
-                click_x = location.left + location.width / 2
-                click_y = location.top + location.height / 2
+                # 찾은 이미지 내의 상대 클릭 좌표
                 if click_pos:
-                    click_x = location.left + click_pos[0]
-                    click_y = location.top + click_pos[1]
-                
+                    rel_x, rel_y = click_pos
+                else:
+                    rel_x = location.width / 2
+                    rel_y = location.height / 2
+
+                # 전체 가상 모니터 기준 오프셋(v_left, v_top) 더하기
+                click_x = v_left + location.left + rel_x
+                click_y = v_top + location.top + rel_y
+
                 if click_type == "double":
                     pyautogui.doubleClick(click_x, click_y)
                 else:
@@ -1805,7 +1912,7 @@ class EMRSequenceApp:
             print(f"이미지 읽기 또는 클릭 오류 ({resolved_path}): {e}")
             return False
 
-    def type_text_char_by_char(self, text, char_interval=0.05):
+    def type_text_char_by_char(self, text):
         original_clipboard = None
         try:
             original_clipboard = pyperclip.paste()
@@ -1816,7 +1923,7 @@ class EMRSequenceApp:
             if not self.is_running: break
             pyperclip.copy(ch)
             pyautogui.hotkey('ctrl', 'v')
-            time.sleep(char_interval)
+            time.sleep(self.char_interval_var.get())
 
         if original_clipboard is not None:
             try:
@@ -1829,13 +1936,13 @@ class EMRSequenceApp:
         while i < len(actions):
             if not self.is_running:
                 break
-            
+
             act = actions[i]
-            
+
             self.root.after(0, lambda item_id=self.tree.get_children()[i]: (
                 self.tree.selection_set(item_id), self.tree.see(item_id)
             ))
-            
+
             if not act.get("enabled", True):
                 i += 1
                 continue
@@ -1848,9 +1955,9 @@ class EMRSequenceApp:
                 elif act["type"] == "type" or act["type"] == "password":
                     if not self.execute_click(act["image"], act.get("click_pos"), act.get("click_type", "single")):
                         raise Exception(f"이미지를 찾을 수 없습니다: {os.path.basename(act['image'])}")
-                    time.sleep(0.5)
+                    time.sleep(self.pre_type_delay_var.get())
                     self.type_text_char_by_char(act["text"])
-                    time.sleep(0.3)
+                    time.sleep(self.post_type_delay_var.get())
 
                 elif act["type"] == "key":
                     keys = act.get("keys", [act.get("key", "")])
@@ -1889,7 +1996,11 @@ class EMRSequenceApp:
                     while time.time() - start_time < timeout:
                         if not self.is_running: break
                         try:
-                            location = pyautogui.locateOnScreen(img, confidence=self.confidence_var.get(), grayscale=True)
+                            # --- 대기 시 이미지 찾기(다중 모니터 대응) 수정 ---
+                            screenshot, _, _ = self.get_full_screenshot_and_offset()
+                            location = pyautogui.locate(img, screenshot, confidence=self.confidence_var.get(),
+                                                        grayscale=True)
+
                             if location:
                                 found = True
                                 break
@@ -1899,13 +2010,13 @@ class EMRSequenceApp:
 
                     if self.is_running and not found:
                         raise Exception(f"시간 초과: {timeout}초 내에 이미지를 찾을 수 없습니다\n({os.path.basename(img_path)})")
-                
+
                 elif act["type"] == "exec_file":
                     try:
                         os.startfile(self._resolve_path(act["path"]))
                     except Exception as e:
                         raise Exception(f"파일을 실행할 수 없습니다: {os.path.basename(act['path'])}\n{e}")
-                
+
                 elif act["type"] == "open_path":
                     try:
                         os.startfile(self._resolve_path(act["path"]))
@@ -1915,8 +2026,8 @@ class EMRSequenceApp:
                 # 성공 시 재시도 횟수 초기화
                 if i in self.retry_counts:
                     self.retry_counts[i] = 0
-                
-                i += 1 # 다음 단계로
+
+                i += 1  # 다음 단계로
 
             except Exception as e:
                 failure_config = act.get("on_failure")
@@ -1934,9 +2045,10 @@ class EMRSequenceApp:
                             continue
                         else:
                             self.root.after(0, lambda e=e: self.status_label.config(text="오류 발생!", foreground="red"))
-                            self.root.after(0, lambda e=e: messagebox.showerror("오류", f"최대 재시도 횟수({max_retries}회)를 초과했습니다.\n\n{str(e)}"))
+                            self.root.after(0, lambda e=e: messagebox.showerror("오류",
+                                                                                f"최대 재시도 횟수({max_retries}회)를 초과했습니다.\n\n{str(e)}"))
                             break
-                    else: # goto_step이 설정되지 않은 경우
+                    else:  # goto_step이 설정되지 않은 경우
                         self.root.after(0, lambda e=e: self.status_label.config(text="오류 발생!", foreground="red"))
                         self.root.after(0, lambda e=e: messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}"))
                         break
@@ -1944,21 +2056,20 @@ class EMRSequenceApp:
                     self.root.after(0, lambda e=e: self.status_label.config(text="오류 발생!", foreground="red"))
                     self.root.after(0, lambda e=e: messagebox.showerror("오류", f"작업 중 오류가 발생했습니다.\n\n{str(e)}"))
                     break
-            
+
             if i < len(actions) and self.is_running:
                 delay_elapsed = 0
                 while delay_elapsed < global_delay:
                     if not self.is_running: break
                     time.sleep(0.1)
                     delay_elapsed += 0.1
-        
+
         if i == len(actions) and self.is_running:
             self.root.after(0, lambda: self.status_label.config(text="작업 완료!", foreground="green"))
         elif not self.is_running:
             self.root.after(0, lambda: self.status_label.config(text="사용자 중단", foreground="orange"))
 
         self.root.after(0, self.reset_ui)
-
 
     def reset_ui(self):
         self.is_running = False
