@@ -367,6 +367,7 @@ class KeyRecorder:
         self.parent = parent
         self.recorded_actions = []
         self.is_recording = False
+        self.current_modifiers = set()
 
         self.win = tk.Toplevel(parent)
         self.win.title("키보드 입력 레코더")
@@ -375,7 +376,7 @@ class KeyRecorder:
         self.win.grab_set()
         center_window(self.win)
 
-        lbl = ttk.Label(self.win, text="[기록 시작] 버튼을 누른 후 키보드를 입력하세요.\n입력하는 키들이 하나의 작업 시퀀스로 저장됩니다.",
+        lbl = ttk.Label(self.win, text="[기록 시작] 버튼을 누른 후 키보드를 입력하세요.\n조합키(Ctrl+C 등)도 지원됩니다.",
                         justify=tk.CENTER, font=("맑은 고딕", 10))
         lbl.pack(pady=15)
 
@@ -395,25 +396,26 @@ class KeyRecorder:
                                    style="Accent.TButton")
         self.save_btn.pack(pady=20, ipadx=20, ipady=5)
 
-        self.win.bind("<Key>", self.on_key_event)
+        self.win.bind("<KeyPress>", self.on_key_press)
+        self.win.bind("<KeyRelease>", self.on_key_release)
 
     def toggle_recording(self):
         if not self.is_recording:
             self.is_recording = True
+            self.current_modifiers.clear()
             self.start_btn.config(text="기록 중지 (정지)")
             self.win.focus_set()
         else:
             self.is_recording = False
+            self.current_modifiers.clear()
             self.start_btn.config(text="기록 시작")
 
     def clear_record(self):
         self.recorded_actions = []
+        self.current_modifiers.clear()
         self.update_display()
 
-    def on_key_event(self, event):
-        if not self.is_recording:
-            return
-
+    def _get_pyautogui_key(self, event):
         key_name = event.keysym.lower()
 
         # PyAutoGUI 호환 키 매핑
@@ -432,22 +434,53 @@ class KeyRecorder:
             "end": "end",
             "home": "home",
             "delete": "delete",
-            "caps_lock": "capslock"
+            "caps_lock": "capslock",
+            "shift_l": "shift",
+            "shift_r": "shift",
+            "control_l": "ctrl",
+            "control_r": "ctrl",
+            "alt_l": "alt",
+            "alt_r": "alt"
         }
 
         if key_name in mapping:
-            final_key = mapping[key_name]
-        elif len(event.char) == 1:
-            final_key = event.char
+            return mapping[key_name]
+        elif len(event.char) == 1 and event.char.isprintable():
+            return event.char.lower()
         else:
-            final_key = key_name
+            return key_name
 
-        # 모디파이어 키 단독 입력은 무시 (조합키는 추후 확장 가능)
-        if final_key in ['shift_l', 'shift_r', 'control_l', 'control_r', 'alt_l', 'alt_r']:
+    def on_key_press(self, event):
+        if not self.is_recording:
+            return
+
+        key = self._get_pyautogui_key(event)
+
+        # 모디파이어 키 처리
+        if key in ['shift', 'ctrl', 'alt', 'win']:
+            self.current_modifiers.add(key)
             return "break"
 
-        self.recorded_actions.append(final_key)
+        # 조합키 생성 (ex: ctrl+c)
+        if self.current_modifiers:
+            # 모디파이어 키들을 정렬해서 일관성 유지 (ctrl, alt, shift 순)
+            mods = sorted(list(self.current_modifiers), key=lambda x: ['ctrl', 'alt', 'shift', 'win'].index(x) if x in ['ctrl', 'alt', 'shift', 'win'] else 99)
+            combo = "+".join(mods + [key])
+            self.recorded_actions.append(combo)
+        else:
+            self.recorded_actions.append(key)
+
         self.update_display()
+        return "break"
+
+    def on_key_release(self, event):
+        if not self.is_recording:
+            return
+            
+        key = self._get_pyautogui_key(event)
+        if key in self.current_modifiers:
+            self.current_modifiers.remove(key)
+            
         return "break"
 
     def update_display(self):
@@ -1970,6 +2003,8 @@ class EMRSequenceApp:
                             pass
 
     def schedule_checker(self):
+        # 시작 시 대기 (EMR 시퀀스 프로그램 UI가 뜨고 로드될 시간을 줌)
+        time.sleep(5)
         while True:
             now_time_str = datetime.now().strftime("%H:%M")
             now_date_str = datetime.now().strftime("%Y-%m-%d")
@@ -1993,7 +2028,11 @@ class EMRSequenceApp:
                     try:
                         minutes, seconds = map(int, schedule_value.split(':'))
                         target_seconds = minutes * 60 + seconds
-                        if abs(uptime_seconds - target_seconds) < 10:
+                        # EMR 시퀀서 프로그램이 실행된 이후(uptime이 많이 지났을 수도 있음)의 조건
+                        # 프로그램이 이미 켜져있는 상태에서 부팅 후 예약이 확인되면 즉시 실행할지 여부를 체크
+                        # 단, 한 번만 실행하기 위해 last_run_date로 확인
+                        # 여유 있게 30초 내외 또는 이미 지나갔다면 실행
+                        if uptime_seconds >= target_seconds:
                             should_run = True
                     except (ValueError, TypeError):
                         continue
@@ -2238,7 +2277,12 @@ class EMRSequenceApp:
                     for k in keys:
                         if not self.is_running: break
                         if k:
-                            pyautogui.press(k)
+                            if "+" in k:
+                                # 복합키 처리 (ex: ctrl+c)
+                                k_parts = k.split("+")
+                                pyautogui.hotkey(*k_parts)
+                            else:
+                                pyautogui.press(k)
                             time.sleep(0.01)
                     time.sleep(0.5)
 
