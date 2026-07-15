@@ -789,6 +789,8 @@ class EMRSequenceApp:
         self.sync_autostart_checkbox()
         self.update_undo_redo_buttons()
 
+        # 스케줄러 시작 시 시간을 기록해두기 위한 변수
+        self.app_start_time = time.time()
         threading.Thread(target=self.schedule_checker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -2005,6 +2007,12 @@ class EMRSequenceApp:
     def schedule_checker(self):
         # 시작 시 대기 (EMR 시퀀스 프로그램 UI가 뜨고 로드될 시간을 줌)
         time.sleep(5)
+        
+        # 프로그램이 시작된 후 기준 시간을 잡기 위한 시작 uptime 기록
+        start_uptime = 0
+        if GET_TICK_COUNT_AVAILABLE:
+            start_uptime = ctypes.windll.kernel32.GetTickCount64() / 1000
+            
         while True:
             now_time_str = datetime.now().strftime("%H:%M")
             now_date_str = datetime.now().strftime("%Y-%m-%d")
@@ -2028,11 +2036,12 @@ class EMRSequenceApp:
                     try:
                         minutes, seconds = map(int, schedule_value.split(':'))
                         target_seconds = minutes * 60 + seconds
-                        # EMR 시퀀서 프로그램이 실행된 이후(uptime이 많이 지났을 수도 있음)의 조건
-                        # 프로그램이 이미 켜져있는 상태에서 부팅 후 예약이 확인되면 즉시 실행할지 여부를 체크
-                        # 단, 한 번만 실행하기 위해 last_run_date로 확인
-                        # 여유 있게 30초 내외 또는 이미 지나갔다면 실행
-                        if uptime_seconds >= target_seconds:
+                        
+                        # "부팅 후(uptime_seconds)" 시간이 프로그램이 켜진 시점(start_uptime)보다 이후인지,
+                        # 혹은 프로그램이 부팅 후 지정 시간 근처에서 시작되었는지를 판단
+                        # 목표 시간에 도달했거나 이미 지난 경우이면서,
+                        # 프로그램이 켜진 시점이 목표 시간 이전이었을 때만 실행하도록 변경
+                        if uptime_seconds >= target_seconds and start_uptime <= target_seconds + 30:
                             should_run = True
                     except (ValueError, TypeError):
                         continue
