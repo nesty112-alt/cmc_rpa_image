@@ -12,9 +12,11 @@ import base64
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 import copy
+import warnings
 
 # --- COM 스레딩 모델 설정 (Tkinter 폴더 대화상자와 pywinauto 충돌로 인한 응답없음 방지) ---
 sys.coinit_flags = 2  # COINIT_APARTMENTTHREADED (STA 모드 강제 지정)
+warnings.filterwarnings("ignore", category=UserWarning, module="pywinauto")
 
 # --- UI 객체 인식(pywinauto) 라이브러리 로드 ---
 try:
@@ -748,6 +750,7 @@ class EMRSequenceApp:
         self.schedules = {}
         self.tray_enabled = tk.BooleanVar(value=False)
         self.autostart_enabled = tk.BooleanVar(value=False)
+        self.autostart_minimized_enabled = tk.BooleanVar(value=False)
         self.confidence_var = tk.DoubleVar(value=0.8)
         self.pre_type_delay_var = tk.DoubleVar(value=0.0)
         self.char_interval_var = tk.DoubleVar(value=0.0)
@@ -796,6 +799,10 @@ class EMRSequenceApp:
             
         threading.Thread(target=self.schedule_checker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        if ("--autostart" in sys.argv or "--minimized" in sys.argv) and self.autostart_minimized_enabled.get():
+            self.root.withdraw()
+            self.show_tray_icon()
 
     def _fixed_map(self, style, option):
         # Treeview 스타일 관련 버그 수정을 위한 헬퍼 함수
@@ -1132,8 +1139,14 @@ class EMRSequenceApp:
         autostart_cb = ttk.Checkbutton(frame, text="윈도우 부팅 시 자동 실행", variable=self.autostart_enabled,
                                        command=self.toggle_autostart)
         autostart_cb.pack(anchor="w", pady=5)
+
+        autostart_minimized_cb = ttk.Checkbutton(frame, text="자동 실행 시 트레이로 최소화", variable=self.autostart_minimized_enabled,
+                                                 command=self.save_config)
+        autostart_minimized_cb.pack(anchor="w", pady=5)
+
         if not WINREG_AVAILABLE:
             autostart_cb.config(state=tk.DISABLED)
+            autostart_minimized_cb.config(state=tk.DISABLED)
 
         delay_frame = ttk.Frame(frame)
         delay_frame.pack(fill=tk.X, pady=(10, 0))
@@ -1928,6 +1941,7 @@ class EMRSequenceApp:
                 "default_delay": self.delay_var.get(),
                 "tray_enabled": self.tray_enabled.get(),
                 "autostart_enabled": self.autostart_enabled.get(),
+                "autostart_minimized_enabled": self.autostart_minimized_enabled.get(),
                 "window_geometry": geometry,
                 "window_state": self.root.state(),
                 "confidence": self.confidence_var.get(),
@@ -1940,6 +1954,7 @@ class EMRSequenceApp:
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
+        self.update_autostart_registry()
 
     def manual_save(self):
         self.save_config()
@@ -1963,6 +1978,7 @@ class EMRSequenceApp:
                     self.default_delay = settings.get("default_delay", 2.0)
                     self.delay_var.set(self.default_delay)
                     self.tray_enabled.set(settings.get("tray_enabled", False))
+                    self.autostart_minimized_enabled.set(settings.get("autostart_minimized_enabled", False))
                     self.window_geometry = settings.get("window_geometry", "")
                     self.window_state = settings.get("window_state", "normal")
                     self.confidence_var.set(settings.get("confidence", 0.8))
@@ -2084,12 +2100,22 @@ class EMRSequenceApp:
 
     def get_autostart_command(self):
         if getattr(sys, 'frozen', False):
-            return f'"{sys.executable}"'
+            return f'"{sys.executable}" --autostart'
         else:
             script_path = os.path.abspath(__file__)
             pythonw = sys.executable.replace("python.exe", "pythonw.exe")
             if not os.path.exists(pythonw): pythonw = sys.executable
-            return f'"{pythonw}" "{script_path}"'
+            return f'"{pythonw}" "{script_path}" --autostart'
+
+    def update_autostart_registry(self):
+        if not WINREG_AVAILABLE: return
+        if self.is_autostart_registered():
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
+                                    winreg.KEY_SET_VALUE) as key:
+                    winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, self.get_autostart_command())
+            except Exception:
+                pass
 
     def is_autostart_registered(self):
         if not WINREG_AVAILABLE: return False

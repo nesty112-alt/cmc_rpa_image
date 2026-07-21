@@ -1,0 +1,306 @@
+{
+    "settings": {
+        "default_delay": 1.0,
+        "tray_enabled": false,
+        "autostart_enabled": false,
+        "autostart_minimized_enabled": false,
+        "window_geometry": "932x766+281+362",
+        "window_state": "normal",
+        "confidence": 0.7,
+        "pre_type_delay": 0.0,
+        "char_interval": 0.0,
+        "post_type_delay": 0.0
+    },
+    "schedules": {
+        "기본 프로세스": {
+            "type": "boot",
+            "value": "00:20"
+        }
+    },
+    "processes": {
+        "기본 프로세스": [
+            {
+                "type": "date_input",
+                "offset": 0,
+                "format": "%Y%m%d",
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "type",
+                "image": "D:\\PycharmProjects\\CMC_RPA_image\\captures\\기본 프로세스\\cap_20260707_092916.png",
+                "text": "ddfaffaf",
+                "alias": "",
+                "click_pos": [
+                    19.0,
+                    387.0
+                ],
+                "click_type": "single",
+                "enabled": true,
+                "on_failure": {
+                    "enabled": true,
+                    "retries": 3,
+                    "goto": 1
+                }
+            },
+            {
+                "type": "date_input",
+                "offset": 0,
+                "format": "%Y%m%d",
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "date_input",
+                "offset": -12,
+                "format": "%Y%m%d",
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single",
+                "on_failure": {
+                    "enabled": false,
+                    "retries": 3,
+                    "goto": 4
+                }
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "d",
+                    "a",
+                    "f",
+                    "a",
+                    "f"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "password",
+                "image": "D:\\PycharmProjects\\CMC_RPA_image\\captures\\기본 프로세스\\cap_20260714_113113.png",
+                "text": "bXJkMjI1ODI2Mjkq",
+                "alias": "",
+                "click_pos": [
+                    100.0,
+                    66.0
+                ],
+                "click_type": "single",
+                "enabled": true
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "s",
+                    "k",
+                    "s",
+                    "m",
+                    "s",
+                    "space",
+                    "r",
+                    "l",
+                    "a",
+                    "t",
+                    "j",
+                    "d",
+                    "w",
+                    "l",
+                    "s",
+                    "d",
+                    "l",
+                    "q",
+                    "s",
+                    "l",
+                    "e",
+                    "k",
+                    ".",
+                    "enter"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single",
+                "on_failure": {
+                    "enabled": true,
+                    "retries": 3,
+                    "goto": 2
+                }
+            },
+            {
+                "type": "click",
+                "image": "D:\\PycharmProjects\\CMC_RPA_image\\captures\\기본 프로세스\\cap_20260707_092822.png",
+                "alias": "",
+                "click_pos": [
+                    39.0,
+                    100.0
+                ],
+                "click_type": "single",
+                "enabled": true
+            },
+            {
+                "type": "click",
+                "image": "D:\\PycharmProjects\\CMC_RPA_image\\captures\\기본 프로세스\\cap_20260714_150508.png",
+                "alias": "",
+                "click_pos": [
+                    70,
+                    45
+                ],
+                "click_type": "single",
+                "enabled": true
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "ctrl+f"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            }
+        ],
+        "cdd": [
+            {
+                "type": "ui_click",
+                "identifiers": {
+                    "auto_id": "",
+                    "title": "OpenNetLink",
+                    "control_type": "Window",
+                    "double_click": false
+                },
+                "alias": "",
+                "enabled": false,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "tab",
+                    "tab"
+                ],
+                "alias": "",
+                "enabled": false,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "password",
+                "text": "bXJkMjI1ODI2Mjkq",
+                "alias": "",
+                "enabled": false,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "enter"
+                ],
+                "alias": "",
+                "enabled": false,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "ui_click",
+                "identifiers": {
+                    "auto_id": "",
+                    "title": "휴지통",
+                    "control_type": "ListItem",
+                    "double_click": true,
+                    "parent_identifiers": {
+                        "title": "Program Manager",
+                        "control_type": "Pane"
+                    }
+                },
+                "alias": "",
+                "enabled": false,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "enter"
+                ],
+                "alias": "",
+                "enabled": false,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "open_path",
+                "path": "D:\\Users\\vmfort\\Desktop",
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "ctrl+f"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "t",
+                    "e",
+                    "l",
+                    "e",
+                    "g",
+                    "r",
+                    "a",
+                    "m"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "f6",
+                    "f6"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "down"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            },
+            {
+                "type": "key",
+                "keys": [
+                    "enter"
+                ],
+                "alias": "",
+                "enabled": true,
+                "click_pos": null,
+                "click_type": "single"
+            }
+        ]
+    }
+}
